@@ -1,7 +1,5 @@
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { PLAYBOOK_DATA } from "./data.js";
 import { PLATFORMS, type Platform } from "../types.js";
 
 /**
@@ -33,24 +31,12 @@ export type Playbook = z.infer<typeof Playbook>;
 
 export const STALE_AFTER_DAYS = 45;
 
-const here = dirname(fileURLToPath(import.meta.url));
 const cache = new Map<Platform, Playbook>();
-
-function playbookPath(platform: Platform): string {
-  // Works from src/ (tsx) and dist/src/ (compiled): JSON lives next to the source.
-  const local = join(here, `${platform}.json`);
-  try {
-    readFileSync(local);
-    return local;
-  } catch {
-    return join(here, "..", "..", "..", "src", "playbooks", `${platform}.json`);
-  }
-}
 
 export function playbook(platform: Platform): Playbook {
   let p = cache.get(platform);
   if (!p) {
-    p = Playbook.parse(JSON.parse(readFileSync(playbookPath(platform), "utf8")));
+    p = Playbook.parse(PLAYBOOK_DATA[platform]);
     cache.set(platform, p);
   }
   return p;

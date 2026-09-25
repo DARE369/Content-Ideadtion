@@ -17,6 +17,7 @@ import { connectedPlatforms } from "../ideation/context.js";
 import { exportBrief, exportIdeas, type ExportFormat } from "../ideation/export.js";
 import { refineIdea } from "../ideation/refine.js";
 import { enqueue } from "../jobs/queue.js";
+import { drainFor, requeueStuck, tickSchedule, tokenResolver } from "../jobs/runner.js";
 import { newId } from "../lib/ids.js";
 import { deleteWorkspace, disconnectAccount } from "../privacy/deletion.js";
 import { tiktokOembed } from "../providers/competitor/tiktokOembed.js";
@@ -28,6 +29,9 @@ import { GOALS, PLATFORMS } from "../types.js";
  * Bearer API_TOKEN); the Idea Cards and analytics pages are studio routes that
  * read these endpoints.
  */
+
+/** Leave headroom under the function limit (vercel.json maxDuration = 300). */
+const CRON_BUDGET_MS = Number(process.env.CRON_BUDGET_MS ?? 240_000);
 
 const Format = z.enum(["md", "json", "csv"]).default("md");
 const CONTENT_TYPES: Record<ExportFormat, string> = { md: "text/markdown; charset=utf-8", json: "application/json", csv: "text/csv; charset=utf-8" };
@@ -52,6 +56,20 @@ export function createApp(db: Db): Hono {
   const app = new Hono();
 
   app.get("/healthz", (c) => c.json({ ok: true }));
+
+  /**
+   * Serverless scheduler: Vercel Cron (or any external cron) calls this with
+   * `Authorization: Bearer CRON_SECRET`. It enqueues due recurring work, then
+   * drains the queue within the function's time budget.
+   */
+  app.get("/cron/tick", async (c) => {
+    const secret = config().CRON_SECRET;
+    if (!secret || !authorized(c.req.header("authorization"), secret)) throw new HTTPException(401, { message: "unauthorized" });
+    await requeueStuck(db);
+    await tickSchedule(db);
+    const ran = await drainFor(db, tokenResolver(), CRON_BUDGET_MS);
+    return c.json({ ran });
+  });
 
   app.use("/v1/*", async (c, next) => {
     const token = config().API_TOKEN;
@@ -271,6 +289,12 @@ export function createApp(db: Db): Hono {
     const r = await latestReport(db, c.req.param("ws"));
     if (!r) throw new HTTPException(404, { message: "no report yet (the first arrives after 3 posts with results)" });
     return c.json(r);
+  });
+
+  /** Run queued jobs now (e.g. right after confirming a Brand Brain while testing). */
+  app.post("/v1/jobs/run", async (c) => {
+    await requeueStuck(db);
+    return c.json({ ran: await drainFor(db, tokenResolver(), CRON_BUDGET_MS) });
   });
 
   app.get("/v1/workspaces/:ws/costs", async (c) => {

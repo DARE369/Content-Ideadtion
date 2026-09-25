@@ -18,6 +18,8 @@ const Env = z.object({
   META_GRAPH_VERSION: z.string().default("v23.0"),
   LINKEDIN_VERSION: z.string().default("202509"),
   PORT: z.coerce.number().int().default(8787),
+  DB_POOL_MAX: z.coerce.number().int().positive().default(10),
+  CRON_SECRET: z.string().optional(),
 });
 
 export type Config = z.infer<typeof Env>;

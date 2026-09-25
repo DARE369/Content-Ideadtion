@@ -12,7 +12,8 @@
     "migrate": "tsx scripts/migrate.ts",
     "worker": "node dist/src/jobs/worker.js",
     "playbooks:check": "tsx scripts/check-playbooks.ts",
-    "worker:dev": "tsx src/jobs/worker.ts"
+    "worker:dev": "tsx src/jobs/worker.ts",
+    "vercel-build": "tsc -p tsconfig.json"
   },
   "license": "UNLICENSED",
   "dependencies": {

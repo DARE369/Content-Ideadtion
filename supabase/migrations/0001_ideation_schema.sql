@@ -2,10 +2,12 @@
 -- Lives in its own `ideation` schema inside the studio's Supabase Postgres so it
 -- never collides with studio tables and can be dropped cleanly.
 
-create extension if not exists vector;
+-- Supabase keeps extensions in their own schema; this also works on plain Postgres.
+create schema if not exists extensions;
+create extension if not exists vector with schema extensions;
 
 create schema if not exists ideation;
-set search_path = ideation, public;
+set search_path = ideation, public, extensions;
 
 -- ---------------------------------------------------------------------------
 -- Workspaces and the Brand Brain

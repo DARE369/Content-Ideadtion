@@ -84,6 +84,43 @@ npm run dev                  # API on :8787
 npm run worker:dev           # job worker (nightly precompute, snapshots, reports)
 ```
 
+### Deploy on Vercel
+
+The API runs as one Vercel Function (`api/index.js` → the compiled Hono app). The background worker becomes a cron
+route. Pages at `/` are static; everything else is rewritten to the function.
+
+1. **Database first:** Vercel does not run migrations. From your machine, set `DATABASE_URL` to the Supabase
+   connection string and run `npm run migrate`. You can also paste the two files in `supabase/migrations/` into
+   the Supabase SQL editor, in order. Enable the `vector` extension if it isn't enabled yet.
+2. **Import the repo in Vercel.** The framework preset is "Other". `vercel.json` sets the build command
+   (`npm run vercel-build`) and the function settings.
+3. **Environment variables** (Project → Settings → Environment Variables), see `.env.example`:
+   - `DATABASE_URL`: use Supabase's **Session pooler** string (port 5432 on `*.pooler.supabase.com`), not the
+     transaction pooler, because the app sets `search_path` per session.
+   - `DB_POOL_MAX=3` (serverless functions should keep few connections).
+   - `API_TOKEN`: any long random string. Send it as `Authorization: Bearer …` on every `/v1` call.
+   - `CRON_SECRET`: a long random string. Vercel Cron sends it automatically.
+   - `ANTHROPIC_API_KEY`, `YOUTUBE_API_KEY`, and optionally `MODEL_FAST`, `MODEL_STRATEGY`,
+     `WORKSPACE_DAILY_BUDGET_USD`, `HTTP_USER_AGENT`.
+   - `STUDIO_TOKEN_URL`, `STUDIO_API_TOKEN`, `STUDIO_WEBHOOK_URL`, `STUDIO_WEBHOOK_SECRET` once the studio side exists.
+4. **Scheduling:** `/cron/tick` enqueues whatever recurring work is due and then runs queued jobs for up to 4 minutes.
+   `vercel.json` schedules it once a day (02:10 UTC), because the Hobby plan only allows daily crons. For metric
+   snapshots on time, either use Pro and change the schedule to `*/10 * * * *`, or point a free external cron
+   (e.g. cron-job.org) at `GET https://<app>.vercel.app/cron/tick` every 10 minutes with the header
+   `Authorization: Bearer <CRON_SECRET>`.
+5. **While testing,** `POST /v1/jobs/run` (with `API_TOKEN`) runs queued jobs immediately. For example, confirm a
+   Brand Brain, then call it to get the first Idea Cards without waiting for the nightly run.
+
+Smoke test after deploying:
+
+```bash
+URL=https://<app>.vercel.app; T=<API_TOKEN>
+curl $URL/healthz
+curl -X POST $URL/v1/workspaces -H "authorization: Bearer $T" -H 'content-type: application/json' \
+  -d '{"studio_workspace_id":"demo","name":"Demo Bakery"}'
+# -> {"workspace_id":"wsp_..."}; then PUT /v1/workspaces/wsp_.../brand-brain, POST /v1/jobs/run, GET /v1/workspaces/wsp_.../ideas
+```
+
 Studio-side, day 1:
 
 1. Apply `supabase/studio/0001_studio_post_brief_link.sql` to the studio's own published-post table. Rename the

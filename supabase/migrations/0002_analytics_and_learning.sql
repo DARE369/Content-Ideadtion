@@ -1,7 +1,7 @@
 -- Analytics (performance index, baselines, rolling stats) and the learning model.
 -- All numbers are computed here or in code; Claude only interprets them.
 
-set search_path = ideation, public;
+set search_path = ideation, public, extensions;
 
 -- Historic posts pulled when an account connects have no 72 h snapshot, only a
 -- lifetime count. They are stored with offset_label = 'backfill'. Lifetime views
