@@ -1,0 +1,47 @@
+{
+  "platform": "instagram",
+  "version": "2026-09-24",
+  "reviewed_at": "2026-09-24",
+  "design_for": [
+    "DM sends",
+    "watch time",
+    "saves"
+  ],
+  "default_format": "reel",
+  "formats": [
+    "reel",
+    "carousel",
+    "single_image"
+  ],
+  "length_seconds": [
+    7,
+    90
+  ],
+  "aspect_ratio": "9:16",
+  "format_aspect_ratios": {
+    "reel": "9:16",
+    "carousel": "4:5",
+    "single_image": "4:5"
+  },
+  "hook": "Visual hook in the first second; say the keywords out loud (audio is indexed).",
+  "caption": "Lead with the value; include spoken keywords; 3-5 relevant hashtags at most.",
+  "cta": [
+    "share",
+    "save",
+    "dm",
+    "link_in_bio"
+  ],
+  "default_cta": "share",
+  "cta_phrasing": "\"Send this to someone who...\" or \"Save this for later\"",
+  "ranking_signals": [
+    "DM sends",
+    "watch time",
+    "saves",
+    "likes per reach"
+  ],
+  "do_not": [
+    "post reels over 90 seconds",
+    "use watermarked video from other apps"
+  ],
+  "notes": "Reels get more reach than carousels; use a carousel when the goal is saves."
+}

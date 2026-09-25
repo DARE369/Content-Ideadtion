@@ -1,0 +1,41 @@
+{
+  "platform": "linkedin",
+  "version": "2026-09-24",
+  "reviewed_at": "2026-09-24",
+  "design_for": [
+    "dwell on the first 3 lines",
+    "comments",
+    "saves"
+  ],
+  "default_format": "document_carousel",
+  "formats": [
+    "document_carousel",
+    "text_post",
+    "talking_head_video"
+  ],
+  "length_seconds": null,
+  "aspect_ratio": "4:5",
+  "format_aspect_ratios": {
+    "document_carousel": "4:5",
+    "text_post": "1.91:1",
+    "talking_head_video": "4:5"
+  },
+  "hook": "Put the insight in the first 3 lines, before \"see more\".",
+  "caption": "Plain, expert voice; few or no hashtags.",
+  "cta": [
+    "question"
+  ],
+  "default_cta": "question",
+  "cta_phrasing": "Close with a question only an expert in the audience can answer.",
+  "ranking_signals": [
+    "dwell time",
+    "comments",
+    "saves",
+    "sends"
+  ],
+  "do_not": [
+    "more than 3 hashtags",
+    "external link in the post body",
+    "engagement pods"
+  ]
+}

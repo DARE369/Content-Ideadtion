@@ -1,0 +1,39 @@
+{
+  "name": "content-ideation-engine",
+  "version": "0.1.0",
+  "description": "Ideation engine, brief handoff, analytics and learning loop for the content studio",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:db": "vitest run --config vitest.db.config.ts",
+    "dev": "tsx watch src/server/index.ts",
+    "start": "node dist/src/server/index.js",
+    "migrate": "tsx scripts/migrate.ts",
+    "worker": "node dist/src/jobs/worker.js",
+    "playbooks:check": "tsx scripts/check-playbooks.ts",
+    "worker:dev": "tsx src/jobs/worker.ts"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
+    "@hono/node-server": "^2.1.1",
+    "fast-xml-parser": "^5.11.1",
+    "hono": "^4.13.9",
+    "pg": "^8.23.0",
+    "ulid": "^3.0.2",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  },
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,175 @@
+# Content Ideation Engine
+
+Ideation, brief handoff, analytics and a learning loop for the content studio. This is the week-1 build of the
+*Content Ideation Engine — Product Spec v2 (Zero-Cost Week 1)*.
+
+**Zero cost except Claude:** data comes from official free APIs (through the accounts the studio already connects),
+keyless public feeds and the studio's Supabase Postgres. There is no scraping and no paid vendor.
+
+```
+ 1 Ideation engine ──▶ 2 Brief handoff ──▶ 3 RESERVED: content mgmt + scheduling
+        ▲                                              │  (emits published_post)
+        │                                              ▼
+ 5 Learning loop ◀──────────────────────── 4 Analytics: ingestion + reports
+```
+
+Every published post carries the `idea_id` and `brief_id` it came from. That link is what lets the loop learn.
+
+## What's in the box
+
+| Stage | Where | What it does |
+| --- | --- | --- |
+| Brand Brain | `src/ideation/brandBrain.ts` | Drafts a brain from the website (goal and language/locale set by the owner); the user confirms it |
+| 1 Ideation | `src/ideation/*`, `src/ai/ideator.ts` | Ideator → Critic → opportunity score → explore/exploit shortlist. Three modes: **Autopilot**, **Give me ideas** (precomputed, a DB read), **Refine my idea** (streamed over SSE) |
+| 2 Handoff | `src/handoff/*`, `src/contracts/brief.ts` | `brief.v1` JSON: one native brief per selected platform (adapters run in parallel), or one general brief when none is selected. Queue table + optional signed webhook; UTM tags carry the `brief_id` |
+| 3 Reserved | `src/contracts/stage3.ts` | Only the contract: `generated_asset` in, `published_post` out. Analytics depends only on `published_post` |
+| 4 Analytics | `src/analytics/*`, `src/providers/own/*` | Own-post metrics for TikTok, Instagram, Facebook, YouTube and LinkedIn; snapshots at 1 h / 6 h / 24 h / 72 h / 7 d / 28 d; performance index (PI), goal index, rolling median / p25 / hit rate; weekly AI report and a 72-hour post autopsy |
+| 5 Learning | `supabase/migrations/0002_*`, `src/learning/*` | Shrunk log(PI) estimate per brand × platform × feature value (SQL view, k = 5); 80/20 exploit/explore with Thompson sampling; floor protection (explore drops to 10% after 2 falling weeks, returns after 2 recovering weeks); "what next" rules feed ideation |
+
+Evidence and signals:
+
+| Source | File | Key |
+| --- | --- | --- |
+| Instagram Business Discovery (competitors) | `src/providers/competitor/instagramBusinessDiscovery.ts` | user's connected professional account |
+| YouTube Data API (competitors, comments, most popular) | `src/providers/competitor/youtube.ts`, `src/providers/signals/youtubeMostPopular.ts` | `YOUTUBE_API_KEY` (the one new key) |
+| TikTok oEmbed (links the user pastes) | `src/providers/competitor/tiktokOembed.ts` | none |
+| Google Trends "Trending now" RSS | `src/providers/signals/googleTrendsRss.ts` | none |
+| Wikipedia pageviews | `src/providers/signals/wikipedia.ts` | none (User-Agent set) |
+| Stack Exchange, Hacker News | `src/providers/signals/stackexchange.ts`, `hackernews.ts` | none |
+| Comments on own posts and competitor YouTube videos | `src/signals/ingest.ts`, `src/competitors/ingest.ts` | via the above |
+
+Every source sits behind the interfaces in `src/providers/types.ts` and is registered in `src/providers/registry.ts`,
+so a paid vendor added later is one more registration. It adds data and replaces nothing.
+
+## How the numbers work
+
+- **Performance index:** `PI = views at 72 h / median(views at 72 h, same platform, previous 20 posts)`.
+  It needs 3 earlier posts. Posts pulled in as history when an account connects get a single `backfill` snapshot
+  (lifetime views). Those count toward the baseline, which makes it conservative, but they never get a PI of their own.
+  The **goal index** does the same with the goal metric: link clicks for leads and sales, follows (or profile visits)
+  for reach, and interactions for engagement.
+- **Learning model** (`v_feature_estimates`): `mu_hat = (n·mean + k·mu_prior)/(n + k)` on log(PI), with k = 5.
+  Priors come from `feature_priors`. An idea's estimate is `intercept + Σ(mu_hat − intercept)` over its feature
+  values, where the intercept is the brand's mean log(PI). Features that appear on every post therefore add nothing,
+  and neither do unseen values. `P(PI > 1) = Φ(mu/se)`. Exploit slots need at least 0.7.
+- **Opportunity score:** `S = 100·(0.30 L + 0.25 F + 0.15 P + 0.10 M + 0.10 W + 0.10 G)`. Until a platform has
+  5 posts with results, L's weight moves to P. The score is always shown as relative ("likely top third"), never as a
+  virality percentage.
+- **Reports:** all numbers are computed in code (`src/reports/tables.ts`). Claude only interprets them. Any claim
+  that doesn't cite a real post id is dropped, and so is any "what next" rule on an unknown feature. The surviving
+  rules go into `guidance_rules`, which ideation applies (for example, "2 of 3 reels open with a price reveal").
+
+## Claude usage
+
+All calls go through `src/ai/client.ts`:
+
+- **Model tiering from config:** `MODEL_FAST` (default `claude-haiku-4-5`) handles the critic, adapters, verdicts,
+  tagging and autopsies. `MODEL_STRATEGY` (default `claude-sonnet-5`) handles ideation, sharpening and weekly reports.
+- **Prompt caching:** the Brand Brain, playbooks, feature vocabulary and rules form a fixed, deterministic prefix
+  with a cache breakpoint.
+- **Structured outputs:** `messages.parse` with zod schemas, then stricter contract validation (`brief.v1`).
+- **Message Batches API** (50% price) for nightly vision tagging of competitor thumbnails and cover frames.
+- **Cost guardrails:** every call writes a row to `cost_log`, and there's a per-workspace daily budget
+  (`WORKSPACE_DAILY_BUDGET_USD`, returns HTTP 429). Also set a global monthly spend cap in the Claude Console.
+  `GET /v1/workspaces/:ws/costs` returns measured spend.
+
+## Setup
+
+```bash
+nvm use                      # Node 22
+npm install
+cp .env.example .env         # fill in DATABASE_URL, ANTHROPIC_API_KEY, YOUTUBE_API_KEY, API_TOKEN, STUDIO_* ...
+npm run migrate              # creates the `ideation` schema in the studio's Supabase Postgres (pgvector required)
+npm run dev                  # API on :8787
+npm run worker:dev           # job worker (nightly precompute, snapshots, reports)
+```
+
+Studio-side, day 1:
+
+1. Apply `supabase/studio/0001_studio_post_brief_link.sql` to the studio's own published-post table. Rename the
+   table first.
+2. Have the studio call `POST /v1/published-posts` at publish time with `brief_id` and `idea_id`.
+3. Expose fresh OAuth tokens for connected accounts at `STUDIO_TOKEN_URL/{studio_connection_id}`
+   → `{access_token, expires_at}`. Tokens never leave the studio's store.
+4. Read briefs from `GET /v1/briefs?status=queued` (or `ideation.briefs`), or receive the signed webhook. Then
+   `POST /v1/briefs/:id/ack`.
+5. Optional: deploy the embeddings function (`supabase functions deploy embed`) and set `EMBED_URL`. Without it,
+   white-space scoring and de-duplication fall back to lexical similarity.
+6. Optional: on Supabase, schedule recurring jobs with `supabase/optional/pg_cron_schedule.sql` and run the worker
+   with `WORKER_SCHEDULE=pg_cron`.
+
+## API (Bearer `API_TOKEN`; the studio is the caller)
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/v1/workspaces` | Create or get the workspace for a studio workspace |
+| POST | `/v1/workspaces/:ws/brand-brain/draft` | Draft from the website `{website_url, goal, language}` |
+| PUT | `/v1/workspaces/:ws/brand-brain` | Confirm (and edit) the Brand Brain; kicks off the first precompute |
+| POST | `/v1/workspaces/:ws/accounts` | Register a studio-connected account; backfills history |
+| DELETE | `/v1/accounts/:id` | Disconnect, deleting that account's platform data |
+| POST/GET/DELETE | `/v1/workspaces/:ws/competitors` | Up to 5 competitors, handles per platform |
+| POST | `/v1/workspaces/:ws/tiktok-links` | Pasted TikTok link → oEmbed caption and cover |
+| GET | `/v1/workspaces/:ws/ideas[?format=md\|csv\|json]` | **Give me ideas**: the precomputed shortlist (5–10 cards) |
+| POST | `/v1/workspaces/:ws/autopilot` | **Make this week's posts**: top idea per connected platform, queued |
+| POST | `/v1/workspaces/:ws/refine` | **Refine my idea** (SSE: `verdict_delta`, `verdict_done`, `ideas`, `platform_brief`, `done`) |
+| POST | `/v1/ideas/:id/handoff` | `{platforms: [...]}` → platform briefs, or `[]` → one general brief |
+| GET | `/v1/ideas/:id`, `/v1/ideas/:id/export?format=` | Card and export |
+| GET | `/v1/briefs?status=queued&workspace_id=` | The studio's brief queue |
+| POST | `/v1/briefs/:id/ack` | Studio acknowledges a brief (idempotent) |
+| GET | `/v1/briefs/:id/export?format=md\|json\|csv` | Brief export |
+| POST | `/v1/published-posts` | Stage-3 `published_post` intake |
+| POST | `/v1/published-posts/:id/confirm-match` | User confirms or rejects a suggested match for an externally published post |
+| GET | `/v1/workspaces/:ws/analytics/overview` | Rolling median, p25, hit rate, goal trend, best and worst posts |
+| GET | `/v1/posts/:id` | Post detail: metric curve, PI, idea, brief, features, autopsy |
+| GET | `/v1/workspaces/:ws/reports/latest` | Latest weekly report |
+| GET | `/v1/workspaces/:ws/costs` | Claude spend by task, last 30 days |
+
+The Idea Cards and analytics pages are studio routes on top of these endpoints (the spec puts the front end inside the
+studio app). Use ECharts or Recharts for the charts.
+
+## Jobs
+
+| Job | When | Does |
+| --- | --- | --- |
+| `nightly` → `nightly_workspace` | 02:10 UTC | Trends RSS and YouTube charts per country; competitors; comments; pillar momentum; vision tagging (batch); ideate → critique → score → shortlist; Autopilot draft briefs; retention purge; playbook staleness warning |
+| `run_due_snapshots` | every 10 min | Metric snapshots on schedule. Rate limits defer, they never drop |
+| `refresh_performance` | after new snapshots | Refresh `mv_post_performance`, rescore shortlists (no Claude cost) |
+| `autopsy` | 72 h snapshot taken | Post autopsy |
+| `account_metrics` | 03:20 UTC | Followers, profile visits |
+| `weekly_reports` | Sunday 18:05 UTC | Floor protection, weekly report, "what next" rules |
+| `batch_poll` | after a batch is submitted | Collect Message Batches results |
+| `deliver_brief` | on handoff | Signed webhook to the studio (when configured) |
+
+## Tests
+
+```bash
+npm test                                   # unit tests (no database)
+TEST_DATABASE_URL=postgresql://... npm run test:db   # integration tests: throwaway DB per file, needs pgvector
+```
+
+The integration tests check PI, baselines, rolling stats and the learning view against values computed in code.
+They also run the whole loop end to end with a fake Claude client and a fake platform provider: precompute →
+shortlist → autopilot → handoff → refine (SSE) → published post → rate-limited snapshot → PI → autopsy → weekly
+report → rules → rescore, plus the guardrails (auth, 5-competitor cap, budget, deletion).
+
+## Verify during app review (before real traffic)
+
+The platform clients use each API's documented endpoints and fields. Metric names do change between Graph and API
+versions, so confirm these against a real test account on day 2:
+
+- **Instagram:** the per-type insights metric lists (`METRICS_BY_TYPE`), and whether Business Discovery returns
+  `view_count`. There's an automatic fallback to likes + 2 × comments when it doesn't.
+- **Facebook:** the post insight names in `POST_METRICS`. A 400 falls back to a minimal set.
+- **LinkedIn:** the `memberCreatorPostAnalytics` query types and the `LinkedIn-Version` header (`LINKEDIN_VERSION`).
+- **TikTok:** `follower_count` needs `user.info.stats`. Without it the field stays null, per the "never guessed" rule.
+- **YouTube Analytics** lags 1–2 days, so early snapshots use real-time Data API counts.
+
+## Still open (from the spec)
+
+- Does the studio use the Instagram API with Facebook Login or with Instagram Login? Business Discovery needs
+  Facebook Login.
+- Is the studio's Supabase project on Free or Pro? Free pauses after 7 idle days, but the nightly job keeps it awake.
+- Which 3–5 real brands will test on day 7?
+
+Week-2 backlog (per the daily rule): paid data vendors, the scheduling block, comment-reply drafting, transcription
+for posts made outside the studio, and cross-brand niche priors.

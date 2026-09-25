@@ -1,0 +1,36 @@
+{
+  "platform": "tiktok",
+  "version": "2026-09-24",
+  "reviewed_at": "2026-09-24",
+  "design_for": [
+    "completion",
+    "re-watch"
+  ],
+  "default_format": "vertical_video",
+  "formats": [
+    "vertical_video",
+    "photo_carousel"
+  ],
+  "length_seconds": [
+    15,
+    45
+  ],
+  "aspect_ratio": "9:16",
+  "hook": "Promise the payoff in the first 1-2 seconds; no intro, no logo.",
+  "caption": "Short, with searchable keywords people would type into TikTok search.",
+  "cta": [
+    "comment"
+  ],
+  "default_cta": "comment",
+  "ranking_signals": [
+    "completion rate",
+    "re-watches",
+    "shares",
+    "comments"
+  ],
+  "do_not": [
+    "open with a logo or brand intro",
+    "bury the payoff after 3 seconds",
+    "use more than 5 hashtags"
+  ]
+}
