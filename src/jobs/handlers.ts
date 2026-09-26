@@ -1,3 +1,4 @@
+import { scanMarket } from "../research/market.js";
 import type { Db } from "../db.js";
 import { pollBatch } from "../ai/batch.js";
 import { backfillAccount, ingestAccountMetrics, refreshPerformance, runDueSnapshots } from "../analytics/ingest.js";
@@ -48,6 +49,7 @@ export const handlers: Record<string, Handler> = {
     await ingestCompetitorComments(db, ws);
     await ingestWorkspaceSignals(db, tokens, ws);
     await tagCompetitorPosts(db, ws).catch((err) => console.warn(`[vision] ${ws}: ${err instanceof Error ? err.message : err}`));
+    await scanMarket(db, ws);
     await precomputeWorkspace(db, ws);
   },
 

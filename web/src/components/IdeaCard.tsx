@@ -1,7 +1,7 @@
-import { ChevronDown, ExternalLink, FileText, MessageCircle, TrendingUp, Trophy, Users, X } from "lucide-react";
+import { ChevronDown, ExternalLink, FileText, MessageCircle, Tag, TrendingUp, Trophy, Users, X } from "lucide-react";
 import { useId, useState } from "react";
 import { Link } from "react-router";
-import { CONFIDENCE_TEXT, FEATURE_NAMES, featureValue, RELATIVE_TEXT } from "../lib/format";
+import { CONFIDENCE_TEXT, FEATURE_NAMES, featureValue, RELATIVE_TEXT, STAGE_TEXT } from "../lib/format";
 import type { Evidence, IdeaCard as Idea } from "../lib/types";
 import { LabelBadge, PlatformBadge } from "./bits";
 import { Button, Card } from "./ui";
@@ -57,11 +57,27 @@ function ScoreBreakdown({ c }: { c: NonNullable<Idea["score_components"]> }) {
   );
 }
 
+/** Plain-language reason for the confidence label, and what would raise it. */
+export function confidenceReason(idea: Idea): string {
+  const outside = idea.evidence.filter((e) => e.kind !== "own_post").length;
+  if (idea.confidence === "high") return "Backed by your own results on similar posts.";
+  if (idea.confidence === "medium") {
+    return idea.evidence.some((e) => e.kind === "own_post")
+      ? "Some of your own results back this. More posts with results will firm it up."
+      : `Backed by ${outside} outside source${outside === 1 ? "" : "s"} (news, buyer questions or competitor posts). Only your own results can make it high.`;
+  }
+  return outside > 0
+    ? "Only one outside source backs this so far. It reaches medium with two, and high once your own posts show results."
+    : "Nothing outside backs this yet; it rests on your Brand Brain. It rises with current news or buyer questions, a competitor post that beat their usual, or 5 of your own posts with results.";
+}
+
 export function IdeaCardView({ idea, onBrief, onDismiss }: { idea: Idea; onBrief: () => void; onDismiss: () => void }) {
   const [open, setOpen] = useState(false);
   const detailsId = useId();
   const visibleEvidence = idea.evidence.slice(0, 2);
-  const features = Object.entries(idea.features).filter(([k]) => ["hook_type", "format", "pillar", "visual_style"].includes(k));
+  const features = Object.entries(idea.features).filter(([k]) => ["hook_type", "format", "pillar", "visual_style", "cta_type"].includes(k));
+  const offer = idea.features.offer;
+  const stage = idea.features.funnel_stage;
 
   return (
     <Card as="article" className="p-5">
@@ -75,9 +91,20 @@ export function IdeaCardView({ idea, onBrief, onDismiss }: { idea: Idea; onBrief
       <h3 className="mt-3 text-lg font-semibold leading-snug">{idea.title}</h3>
       <p className="mt-1.5 text-sm text-ink-2"><span className="font-medium text-ink">Why now: </span>{idea.why_now}</p>
 
+      {(offer || stage) && (
+        <p className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+          {offer && (
+            <span className="inline-flex items-center gap-1 rounded-md bg-good-soft px-2 py-1 font-medium text-good">
+              <Tag className="size-3.5" aria-hidden />{offer === "brand" ? "Builds brand trust" : `Sells ${offer}`}
+            </span>
+          )}
+          {stage && <span className="rounded-md bg-surface-2 px-2 py-1 text-ink-2" title={STAGE_TEXT[stage]?.help}>{STAGE_TEXT[stage]?.label ?? stage} stage</span>}
+        </p>
+      )}
+
       <p className="mt-3 text-sm">
         <span className="font-medium">{RELATIVE_TEXT[idea.relative]}</span>
-        <span className="text-ink-3"> · {CONFIDENCE_TEXT[idea.confidence]}</span>
+        <span className="text-ink-3"> · <span title={confidenceReason(idea)} className="cursor-help underline decoration-dotted underline-offset-2">{CONFIDENCE_TEXT[idea.confidence]}</span></span>
       </p>
 
       {visibleEvidence.length > 0 && <div className="mt-4"><EvidenceList items={visibleEvidence} /></div>}
@@ -112,12 +139,18 @@ export function IdeaCardView({ idea, onBrief, onDismiss }: { idea: Idea; onBrief
               </div>
             )}
           </div>
-          {idea.score_components && (
+          <div className="flex flex-col gap-4">
+            {idea.score_components && (
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-3">Why it's ranked here</h4>
+                <div className="mt-3"><ScoreBreakdown c={idea.score_components} /></div>
+              </div>
+            )}
             <div>
-              <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-3">Why it's ranked here</h4>
-              <div className="mt-3"><ScoreBreakdown c={idea.score_components} /></div>
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-3">{CONFIDENCE_TEXT[idea.confidence]}</h4>
+              <p className="mt-1.5 text-sm text-ink-2">{confidenceReason(idea)}</p>
             </div>
-          )}
+          </div>
         </div>
       )}
 

@@ -46,13 +46,16 @@ function ideaBlock(idea: IdeaRow): string {
     `Idea: ${idea.title}`,
     `Core idea: ${idea.core_idea}`,
     `Why now: ${idea.why_now}`,
-    `Planned features: ${Object.entries(idea.features).map(([k, v]) => `${k}=${v}`).join(", ")}`,
+    idea.features.offer && idea.features.offer !== "brand" ? `Sells: ${idea.features.offer}` : null,
+    idea.features.funnel_stage ? `Buyer stage: ${idea.features.funnel_stage}. Make the CTA fit this stage.` : null,
+    `Planned features: ${Object.entries(idea.features).filter(([k]) => k !== "offer" && k !== "funnel_stage").map(([k, v]) => `${k}=${v}`).join(", ")}`,
     idea.risks.length ? `Risks to avoid: ${idea.risks.join("; ")}` : null,
   ].filter(Boolean).join("\n");
 }
 
-function ctaUrl(brain: WorkspaceBrain): string | null {
-  return brain.offers.find((o) => o.url)?.url ?? brain.website_url ?? null;
+/** Link to the page of the product the idea sells, else any product page, else the website. */
+function ctaUrl(brain: WorkspaceBrain, offer?: string): string | null {
+  return brain.offers.find((o) => o.name === offer && o.url)?.url ?? brain.offers.find((o) => o.url)?.url ?? brain.website_url ?? null;
 }
 
 function common(idea: IdeaRow, brain: WorkspaceBrain, briefId: string) {
@@ -83,7 +86,7 @@ export async function buildPlatformBrief(db: Db, idea: IdeaRow, brain: Workspace
   });
   const briefId = newId("brf");
   const format = pb.formats.includes(out.format) ? out.format : pb.default_format;
-  const url = ctaUrl(brain);
+  const url = ctaUrl(brain, idea.features.offer);
   const lengths =
     out.length_seconds_min != null && out.length_seconds_max != null && pb.length_seconds
       ? ([Math.max(0, out.length_seconds_min), Math.min(out.length_seconds_max, pb.length_seconds[1])] as [number, number])
@@ -119,7 +122,7 @@ export async function buildGeneralBrief(db: Db, idea: IdeaRow, brain: WorkspaceB
     schema: GeneralOutput,
   });
   const briefId = newId("brf");
-  const url = ctaUrl(brain);
+  const url = ctaUrl(brain, idea.features.offer);
   return GeneralBrief.parse({
     ...common(idea, brain, briefId),
     kind: "general",

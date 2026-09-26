@@ -42,11 +42,29 @@ export function humanize(v: string | null | undefined): string {
 export const FEATURE_NAMES: Record<string, string> = {
   hook_type: "Opener", format: "Format", pillar: "Content pillar", length_bucket: "Length", posting_day: "Day",
   posting_hour: "Time", idea_source: "Idea source", cta_type: "Call to action", visual_style: "Visual style", language: "Language",
+  funnel_stage: "Buyer stage", offer: "Sells",
 };
+
+export const STAGE_TEXT: Record<string, { label: string; help: string }> = {
+  awareness: { label: "Awareness", help: "For buyers who don't see the problem yet" },
+  consideration: { label: "Consideration", help: "For buyers weighing their options" },
+  decision: { label: "Decision", help: "For buyers close to buying; removes a hesitation" },
+};
+
+/** Progress narration while ideas are generated (market scan, then 15 drafts cut to a shortlist of 8). */
+export const IDEA_STEPS = [
+  "Scanning your market for news and buyer questions",
+  "Reading your brand and what you sell",
+  "Drafting 15 ideas",
+  "An editor cuts the weak ones",
+  "Keeping the best 8 for this week",
+];
 
 const DAY_NAMES: Record<string, string> = { mon: "Monday", tue: "Tuesday", wed: "Wednesday", thu: "Thursday", fri: "Friday", sat: "Saturday", sun: "Sunday" };
 export function featureValue(feature: string, value: string): string {
   if (feature === "posting_day") return DAY_NAMES[value] ?? value;
+  if (feature === "offer") return value === "brand" ? "Brand trust" : value;
+  if (feature === "funnel_stage") return STAGE_TEXT[value]?.label ?? humanize(value);
   return humanize(value);
 }
 

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
+import { MIGRATIONS } from "../../src/migrations.generated.js";
 import { ensureSchema, resetSchemaState } from "../../src/schema.js";
 import type Anthropic from "@anthropic-ai/sdk";
 import { setAnthropic } from "../../src/ai/client.js";
@@ -37,7 +38,8 @@ describe("automatic migrations", () => {
     await ensureSchema(pool);
     resetSchemaState();
     await ensureSchema(pool);
-    expect(await applied(pool)).toEqual(["0001_ideation_schema.sql", "0002_analytics_and_learning.sql", "0003_brand_research.sql"]);
+    expect(await applied(pool)).toEqual(MIGRATIONS.map((m) => m.name));
+    expect(MIGRATIONS.map((m) => m.name).slice(0, 4)).toEqual(["0001_ideation_schema.sql", "0002_analytics_and_learning.sql", "0003_brand_research.sql", "0004_buyer_insight.sql"]);
     const cols = (await pool.query("select column_name from information_schema.columns where table_schema = 'ideation' and table_name = 'brand_brains'")).rows.map((r) => r.column_name);
     expect(cols).toEqual(expect.arrayContaining(["description", "industry", "social_links", "competitor_suggestions", "research"]));
     const rls = await pool.query("select count(*)::int as n from pg_tables where schemaname = 'ideation' and not rowsecurity");
@@ -51,7 +53,7 @@ describe("automatic migrations", () => {
     await pool.query("insert into ideation.workspaces (id, studio_workspace_id, name) values ('wsp_keep', 's', 'Existing')");
     resetSchemaState();
     await ensureSchema(pool);
-    expect(await applied(pool)).toHaveLength(3);
+    expect(await applied(pool)).toHaveLength(MIGRATIONS.length);
     expect((await pool.query("select name from ideation.workspaces")).rows).toEqual([{ name: "Existing" }]);
     await pool.end();
   });

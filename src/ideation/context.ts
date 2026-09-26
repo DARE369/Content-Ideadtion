@@ -16,7 +16,7 @@ export async function loadBrain(db: Db, workspaceId: string): Promise<WorkspaceB
   const r = await db.query(
     `select w.id as workspace_id, w.name, b.website_url, b.brand_kit, b.goal, b.language, b.timezone, b.trends_geo,
             b.tone_words, b.pillars, coalesce(b.audience, '') as audience, b.offers, b.banned_topics,
-            b.description, b.industry, b.country, b.social_links
+            b.description, b.industry, b.country, b.social_links, b.buyer_questions, b.objections
      from workspaces w join brand_brains b on b.workspace_id = w.id
      where w.id = $1 and b.confirmed_at is not null`,
     [workspaceId],
@@ -28,6 +28,8 @@ export async function loadBrain(db: Db, workspaceId: string): Promise<WorkspaceB
     description: row.description ?? undefined,
     industry: row.industry ?? undefined,
     social_links: row.social_links ?? [],
+    buyer_questions: row.buyer_questions ?? [],
+    objections: row.objections ?? [],
     brand_kit: { colors: [], fonts: [], ...row.brand_kit },
     goal: row.goal as Goal,
   };
@@ -51,7 +53,11 @@ export interface IdeationContext {
   platforms: Platform[];
   ownPosts: OwnPostRow[];
   competitorWinners: { id: string; platform: string; outlier_ratio: number; title: string | null; caption: string | null; tags: unknown; url: string | null }[];
-  signals: { id: string; source: string; title: string | null; momentum: number | null; url: string | null }[];
+  /** Trend feeds and the web market scan (source claude_web_search, with kind/summary/date/product). */
+  signals: {
+    id: string; source: string; title: string | null; momentum: number | null; url: string | null;
+    kind?: string | null; summary?: string | null; published?: string | null; product?: string | null;
+  }[];
   questions: { id: string; origin: string; platform: string; text: string; like_count: number | null }[];
   rules: { platform: string | null; feature: string; value: string; action: string; share: number | null; rationale: string }[];
   patterns: { platform: Platform; feature: string; value: string; n: number; p_beat: number; label: "proven" | "unproven" | "weak" }[];
@@ -79,11 +85,17 @@ export async function loadContext(db: Db, workspaceId: string): Promise<Ideation
     [workspaceId],
   );
 
+  // The market scan gets its own quota so generic trend feeds can't crowd it out.
   const signals = await db.query(
-    `select id, source, coalesce(title, topic) as title, momentum::float8 as momentum, url from signals
-     where (workspace_id = $1 or (workspace_id is null and geo = $2))
-       and observed_at > now() - interval '7 days'
-     order by momentum desc nulls last, observed_at desc limit 30`,
+    `(select id, source, coalesce(title, topic) as title, momentum::float8 as momentum, url,
+             payload->>'kind' as kind, payload->>'summary' as summary, payload->>'published' as published, payload->>'product' as product
+      from signals where workspace_id = $1 and source = 'claude_web_search' and observed_at > now() - interval '10 days'
+      order by momentum desc nulls last, observed_at desc limit 15)
+     union all
+     (select id, source, coalesce(title, topic) as title, momentum::float8 as momentum, url, null, null, null, null
+      from signals where (workspace_id = $1 or (workspace_id is null and geo = $2)) and source <> 'claude_web_search'
+        and observed_at > now() - interval '7 days'
+      order by momentum desc nulls last, observed_at desc limit 20)`,
     [workspaceId, brain.trends_geo],
   );
 
@@ -143,8 +155,12 @@ export function renderContext(ctx: IdeationContext): string {
   for (const q of ctx.questions) lines.push(`${q.id} | ${q.origin} ${q.platform} | likes ${q.like_count ?? 0} | ${q.text.replace(/\s+/g, " ")}`);
   lines.push("", "## Competitor winners (>= 2.5x their own median)");
   for (const w of ctx.competitorWinners) lines.push(`${w.id} | ${w.platform} | ${w.outlier_ratio.toFixed(1)}x | ${(w.title ?? w.caption ?? "").replace(/\s+/g, " ").slice(0, 160)} | tags ${JSON.stringify(w.tags ?? {})}`);
+  const market = ctx.signals.filter((s) => s.source === "claude_web_search");
+  lines.push("", "## Market scan: what buyers are paying attention to now (web, cited). Prefer these for \"why now\".");
+  lines.push("id | kind | date | relevance | makes relevant | headline — why buyers care");
+  for (const s of market) lines.push(`${s.id} | ${s.kind ?? "news"} | ${s.published ?? "?"} | ${fmt(s.momentum)} | ${s.product ?? "–"} | ${s.title ?? ""} — ${s.summary ?? ""}`);
   lines.push("", "## Trend signals (momentum 0-1, >0.5 rising)");
-  for (const s of ctx.signals) lines.push(`${s.id} | ${s.source} | ${fmt(s.momentum)} | ${s.title ?? ""}`);
+  for (const s of ctx.signals.filter((x) => x.source !== "claude_web_search")) lines.push(`${s.id} | ${s.source} | ${fmt(s.momentum)} | ${s.title ?? ""}`);
   lines.push("", "## Active guidance rules from the last report");
   for (const r of ctx.rules) lines.push(`${r.platform ?? "all"} | ${r.action} ${r.feature}=${r.value}${r.share != null ? ` in ${Math.round(r.share * 100)}% of posts` : ""} | ${r.rationale}`);
   return lines.join("\n");

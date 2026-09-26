@@ -75,9 +75,9 @@ export async function refineIdea(
   const saved: RefinedIdea[] = [];
   for (const s of scored) {
     const id = newId("ide");
-    const features = toFeatures({ ...s.c, brand_fit: 0.75 }, ctx.brain.language) as Record<string, string>;
+    const features = toFeatures({ ...s.c, brand_fit: 0.75 }, ctx.brain.language, ctx.brain.offers) as Record<string, string>;
     const rel = relativeLabel(s.score, scores);
-    const conf = confidenceLabel(s.evidenceN, s.platform ? ctx.postsWithResults[s.platform] ?? 0 : 0);
+    const conf = confidenceLabel(s.evidenceN, s.platform ? ctx.postsWithResults[s.platform] ?? 0 : 0, s.outside);
     await db.query(
       `insert into ideas (id, workspace_id, mode, platform, title, why_now, core_idea, evidence, features, score, score_components,
           relative_label, confidence, content_type, effort, risks, slot, status)

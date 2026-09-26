@@ -22,8 +22,9 @@ Find out:
 1. What the company actually does, in one or two plain sentences, and its industry and markets (countries/regions).
 2. Its products and services, and which ones generate the revenue. Mark each as CORE (a main revenue line), SECONDARY (sold, but smaller), or LEAD MAGNET (free or low-cost, used to win customers). Give prices if public, and the page URL.
 3. Who buys: the customer segments (B2B vs consumer, job titles or life situations, sectors).
-4. Its public social media profiles (full URLs). Only include profiles you actually found.
-5. Its competitors: 6-10 companies that sell the SAME core products to the SAME kind of customer in the SAME markets. Prefer direct competitors over famous giants from other markets. For each: name, website, why they compete, which of this company's products they overlap with, and their public social handles if you find them (Instagram, YouTube, TikTok, LinkedIn, Facebook).
+4. What buyers ask before they buy (in their words) and what makes them hesitate (price, risk, switching cost, trust, proof). Look at FAQs, reviews, forums and industry discussions.
+5. Its public social media profiles (full URLs). Only include profiles you actually found.
+6. Its competitors: 6-10 companies that sell the SAME core products to the SAME kind of customer in the SAME markets. Prefer direct competitors over famous giants from other markets. For each: name, website, why they compete, which of this company's products they overlap with, and their public social handles if you find them (Instagram, YouTube, TikTok, LinkedIn, Facebook).
 
 Write concise notes with a "Sources" list of the URLs you relied on.`;
 
@@ -36,6 +37,8 @@ const Profile = z.object({
   country: z.string().describe("ISO 3166 alpha-2 of the main market, or empty"),
   language: z.string().describe("BCP 47 content language and locale for posts, e.g. en-NG"),
   audience: z.string().describe("who buys, specific"),
+  buyer_questions: z.array(z.string()).describe("3-8 questions buyers ask before buying, in their words"),
+  objections: z.array(z.string()).describe("2-6 reasons buyers hesitate"),
   pillars: z.array(z.string()),
   tone_words: z.array(z.string()),
   products: z.array(z.object({
@@ -160,6 +163,8 @@ export function mergeProfile(site: SiteProfile, p: Profile, input: { website_url
     tone_words: p.tone_words.map(clean).filter(Boolean).slice(0, 8),
     pillars: p.pillars.map(clean).filter(Boolean).slice(0, 6),
     audience: clean(p.audience),
+    buyer_questions: p.buyer_questions.map(clean).filter(Boolean).slice(0, 10),
+    objections: p.objections.map(clean).filter(Boolean).slice(0, 10),
     offers,
     banned_topics: p.banned_topics.map(clean).filter(Boolean),
   };
@@ -298,7 +303,7 @@ async function structure(db: Db, workspaceId: string, notes: string, site: SiteP
 export function siteOnlyProfile(site: SiteProfile): Profile {
   return {
     name: site.name ?? "", description: site.description ?? "", industry: "", country: site.country ?? "", language: site.language ?? "",
-    audience: "", pillars: [], tone_words: [], products: [], social_links: [], brand_colors: [], banned_topics: [], competitors: [],
+    audience: "", buyer_questions: [], objections: [], pillars: [], tone_words: [], products: [], social_links: [], brand_colors: [], banned_topics: [], competitors: [],
   };
 }
 

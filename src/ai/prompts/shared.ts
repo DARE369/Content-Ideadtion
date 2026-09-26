@@ -40,6 +40,8 @@ export function brandBrainBlock(brain: BrandBrain & { name?: string }): string {
     `Audience: ${brain.audience}`,
     `Content pillars: ${brain.pillars.join(" | ")}`,
     `Products and services:\n${offers.join("\n") || "n/a"}`,
+    brain.buyer_questions?.length ? `Questions buyers ask before they buy:\n${brain.buyer_questions.map((q) => `- ${q}`).join("\n")}` : null,
+    brain.objections?.length ? `What makes buyers hesitate:\n${brain.objections.map((q) => `- ${q}`).join("\n")}` : null,
     hasCore ? "Most ideas should build demand for the CORE revenue products and services, directly or by answering the questions their buyers have. Don't drift into topics the company doesn't sell." : null,
     `Brand colors: ${brain.brand_kit.colors.join(", ") || "n/a"}`,
     `Banned topics (never suggest, never mention): ${brain.banned_topics.join(", ") || "none"}`,

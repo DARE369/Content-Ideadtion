@@ -9,6 +9,7 @@ import { precomputeWorkspace } from "../ideation/precompute.js";
 import { enqueue } from "../jobs/queue.js";
 import { probBeatsBaseline } from "../learning/model.js";
 import { isTimeout } from "../ai/client.js";
+import { scanMarket } from "../research/market.js";
 import { addSuggestedCompetitors, CompetitorResearchError, MAX_COMPETITORS, researchCompetitors, type CompetitorSuggestion } from "../research/brand.js";
 
 /**
@@ -102,6 +103,12 @@ export function registerUiRoutes(app: Hono, db: Db): void {
     )).rows }));
 
   /** Generate a fresh shortlist now (the same pipeline the nightly job runs). */
+  /** Web market scan before generating: cited "why now" evidence. Reuses a scan from the last 20 hours. */
+  app.post("/v1/workspaces/:ws/market-scan", async (c) => {
+    if (!config().ANTHROPIC_API_KEY) return c.json({ ok: false, found: 0, reused: false, warning: "The market scan needs ANTHROPIC_API_KEY on the server." });
+    return c.json(await scanMarket(db, c.req.param("ws"), { force: c.req.query("force") === "1" }));
+  });
+
   app.post("/v1/workspaces/:ws/ideas/generate", async (c) => {
     const ws = c.req.param("ws");
     if (!config().ANTHROPIC_API_KEY) throw new HTTPException(503, { message: "Idea generation needs ANTHROPIC_API_KEY on the server." });

@@ -223,6 +223,12 @@ export function BrandBrainForm({ value, onChange, name, onNameChange, logos = []
         <Field label="Who you're talking to" htmlFor="bb-audience" hint="Be specific: who they are, where, and what they want from you.">
           <textarea id="bb-audience" rows={3} className={textareaClass} value={value.audience} onChange={(e) => set("audience", e.target.value)} />
         </Field>
+        <Field label="What buyers ask before they buy" htmlFor="bb-questions" hint="In their words. Ideas that answer these move people towards buying.">
+          <ChipInput id="bb-questions" sentences values={value.buyer_questions ?? []} onChange={(v) => set("buyer_questions", v)} max={15} placeholder="e.g. How long does it take to set up? (press Enter)" />
+        </Field>
+        <Field label="What makes them hesitate" htmlFor="bb-objections" hint="Price, risk, switching, trust. Decision-stage ideas tackle these head on.">
+          <ChipInput id="bb-objections" sentences values={value.objections ?? []} onChange={(v) => set("objections", v)} max={15} placeholder="e.g. Worried about data security (press Enter)" />
+        </Field>
         <Field label="Content pillars" htmlFor="bb-pillars" hint="3–5 themes you can post about again and again. Every idea fits one of these.">
           <ChipInput id="bb-pillars" values={value.pillars} onChange={(v) => set("pillars", v)} max={6} placeholder="Add a pillar and press Enter" />
         </Field>

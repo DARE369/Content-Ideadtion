@@ -1,6 +1,11 @@
 import { sortEvidence, type Evidence } from "../contracts/idea.js";
 import type { IdeationContext } from "./context.js";
 
+const MARKET_KIND_TEXT: Record<string, string> = {
+  news: "In the news", regulation: "Regulation", event: "Event", deal: "Deal", data: "New data",
+  buyer_question: "Buyers are asking", competitor_content: "A competitor published",
+};
+
 /** Resolve cited ids into linked evidence, own winners first. Unknown ids are dropped. */
 export function resolveEvidence(ctx: IdeationContext, ids: string[]): Evidence[] {
   const out: Evidence[] = [];
@@ -21,6 +26,10 @@ export function resolveEvidence(ctx: IdeationContext, ids: string[]): Evidence[]
       continue;
     }
     const s = ctx.signals.find((x) => x.id === id);
+    if (s?.source === "claude_web_search") {
+      out.push({ kind: "web", id, url: s.url, summary: `${MARKET_KIND_TEXT[s.kind ?? ""] ?? "In the news"}${s.published ? ` (${s.published})` : ""}: ${s.title ?? ""}` });
+      continue;
+    }
     if (s) out.push({ kind: "trend", id, url: s.url, summary: `${s.source.replace(/_/g, " ")}: ${s.title ?? ""}${s.momentum != null ? ` (momentum ${s.momentum.toFixed(2)})` : ""}` });
   }
   return sortEvidence(out);

@@ -72,7 +72,7 @@ describe("merging research with the site", () => {
   };
   const profile = {
     name: "Lordsway Energy", description: "Digital intelligence for oil and gas operators in Africa.", industry: "Oil & gas technology", country: "NG",
-    language: "en-NG", audience: "Operations leaders at upstream oil and gas companies", pillars: ["Digital oilfield", "Asset integrity"], tone_words: ["expert"],
+    language: "en-NG", audience: "Operations leaders at upstream oil and gas companies", buyer_questions: [" How long does rollout take? ", ""], objections: ["Data security"], pillars: ["Digital oilfield", "Asset integrity"], tone_words: ["expert"],
     products: [
       { name: "Free readiness assessment", description: "", category: "", revenue_role: "lead_magnet" as const, price: "", url: "" },
       { name: "Production monitoring platform", description: "SaaS", category: "Software", revenue_role: "core" as const, price: "", url: "https://lordswayenergy.com/solutions" },
@@ -89,6 +89,8 @@ describe("merging research with the site", () => {
 
   it("core revenue lines first; colours, socials and locale merged and cleaned", () => {
     expect(m.brain.offers.map((o) => o.revenue_role)).toEqual(["core", "lead_magnet"]);
+    expect(m.brain.buyer_questions).toEqual(["How long does rollout take?"]);
+    expect(m.brain.objections).toEqual(["Data security"]);
     expect(m.brain.offers[0]).toMatchObject({ name: "Production monitoring platform", url: "https://lordswayenergy.com/solutions" });
     expect(m.brain.brand_kit.colors).toEqual(["#7ac143", "#f2c500"]);
     expect(m.brain.brand_kit.logo_url).toBe("https://lordswayenergy.com/logo.png");

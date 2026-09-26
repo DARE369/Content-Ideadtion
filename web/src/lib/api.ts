@@ -3,6 +3,9 @@ import type {
   Learning, Match, Overview, Platform, PostDetail, PostRow, ReportDetail, ReportListItem, Summary, WorkspaceListItem,
 } from "./types";
 
+export interface MarketScan { ok: boolean; found: number; reused: boolean; warning?: string }
+export interface GenerateResult { ideas: IdeaCard[]; drafted?: number; kept?: number; shortlisted?: number; scan: MarketScan }
+
 export class ApiError extends Error {
   constructor(public readonly status: number, message: string) {
     super(message);
@@ -110,7 +113,13 @@ export const api = {
   disconnect: (id: string) => del<{ deleted: { posts: number; comments: number } }>(`/v1/accounts/${id}`),
 
   ideas: (ws: string) => get<{ ideas: IdeaCard[] }>(`/v1/workspaces/${ws}/ideas?limit=10`).then((r) => r.ideas),
-  generateIdeas: (ws: string) => post<{ ideas: IdeaCard[] }>(`/v1/workspaces/${ws}/ideas/generate`, {}, { timeoutMs: 300_000 }),
+  /** Scan the market first (cited "why now"), then generate. A failed scan never blocks the ideas. */
+  generateIdeas: async (ws: string): Promise<GenerateResult> => {
+    const scan = await post<MarketScan>(`/v1/workspaces/${ws}/market-scan`, {}, { timeoutMs: 120_000 })
+      .catch((): MarketScan => ({ ok: false, found: 0, reused: false, warning: "The market scan didn't finish, so these ideas don't cite current news." }));
+    const r = await post<Omit<GenerateResult, "scan">>(`/v1/workspaces/${ws}/ideas/generate`, {}, { timeoutMs: 300_000 });
+    return { ...r, scan };
+  },
   idea: (id: string) => get<IdeaCard>(`/v1/ideas/${id}`),
   dismissIdea: (id: string) => post(`/v1/ideas/${id}/dismiss`),
   handoff: (id: string, platforms: Platform[]) => post<{ briefs: BriefPayload[] }>(`/v1/ideas/${id}/handoff`, { platforms }),

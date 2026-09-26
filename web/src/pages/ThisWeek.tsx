@@ -10,7 +10,7 @@ import { NarratedProgress } from "../components/Progress";
 import { useToast } from "../components/Toast";
 import { Button, Card, EmptyState, ErrorNote, PageHeader, Skeleton } from "../components/ui";
 import { api, download, exportUrl } from "../lib/api";
-import { PLATFORM_META, relativeTime, weekRange } from "../lib/format";
+import { featureValue, IDEA_STEPS, PLATFORM_META, relativeTime, STAGE_TEXT, weekRange } from "../lib/format";
 import type { IdeaCard, Platform } from "../lib/types";
 import { useAppConfig, useSummary, useWs } from "../lib/workspace";
 
@@ -32,7 +32,7 @@ export function ThisWeek() {
     onSuccess: (r) => {
       qc.setQueryData(["ws", ws, "ideas"], r.ideas);
       qc.invalidateQueries({ queryKey: ["ws", ws, "summary"] });
-      toast({ tone: "success", message: `${r.ideas.length} fresh ideas ready.` });
+      toast({ tone: "success", message: `${r.ideas.length} ideas made the cut${r.drafted ? ` from ${r.drafted} drafts` : ""}.${r.scan.warning ? ` ${r.scan.warning}` : ""}` });
     },
     onError: (e) => toast({ tone: "error", message: e.message }),
   });
@@ -115,7 +115,7 @@ export function ThisWeek() {
       ) : generate.isPending && list.length === 0 ? (
         <Card className="p-6">
           <h2 className="font-semibold">Writing this week's ideas…</h2>
-          <div className="mt-4"><NarratedProgress intervalMs={9000} steps={["Reading your Brand Brain", "Looking at what already works", "Writing 15 ideas", "Cutting the weak ones", "Scoring the shortlist"]} /></div>
+          <div className="mt-4"><NarratedProgress intervalMs={14000} steps={IDEA_STEPS} /></div>
         </Card>
       ) : list.length === 0 ? (
         <EmptyState icon={<Lightbulb className="size-8" />} title="No ideas yet this week"
@@ -123,7 +123,7 @@ export function ThisWeek() {
             ? <Button variant="primary" loading={generate.isPending} onClick={() => generate.mutate()}>Generate ideas</Button>
             : undefined}>
           {cfg.data?.ai_configured
-            ? "Ideas arrive automatically every night. You can also generate a batch now; it takes about a minute."
+            ? "Ideas arrive automatically every night. You can also generate a batch now; it takes a minute or two."
             : "Idea generation needs an Anthropic API key on the server. Once it's set, ideas arrive every night."}
         </EmptyState>
       ) : (
@@ -141,6 +141,8 @@ export function ThisWeek() {
                 options={[{ value: "all", label: "All" }, { value: "proven", label: "Proven" }, { value: "test", label: "Tests" }]} />
             </div>
           </div>
+          <IdeaMix ideas={list} />
+          {list.every((i) => i.confidence === "low") && <LowConfidenceNote />}
           {shown.length === 0 ? (
             <p className="rounded-xl border border-dashed border-line-strong px-4 py-8 text-center text-sm text-ink-2">No ideas match these filters.</p>
           ) : (
@@ -157,6 +159,40 @@ export function ThisWeek() {
       <CreateBriefDialog idea={briefFor} onClose={() => setBriefFor(null)} />
       <AutopilotDialog open={autopilot} onClose={() => setAutopilot(false)} ideas={list} platforms={connected} />
     </>
+  );
+}
+
+/** Where this week's ideas sit in the buyer journey and what they sell. */
+function IdeaMix({ ideas }: { ideas: IdeaCard[] }) {
+  const stages = (["awareness", "consideration", "decision"] as const).map((s) => [s, ideas.filter((i) => i.features.funnel_stage === s).length] as const);
+  const offers = new Map<string, number>();
+  for (const i of ideas) if (i.features.offer) offers.set(i.features.offer, (offers.get(i.features.offer) ?? 0) + 1);
+  if (!stages.some(([, n]) => n) && offers.size === 0) return null;
+  return (
+    <div className="mb-4 flex flex-col gap-2 rounded-xl bg-surface-2 px-4 py-3 text-sm sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6">
+      {stages.some(([, n]) => n) && (
+        <p><span className="text-ink-3">Buyer stage: </span>{stages.map(([s, n]) => `${n} ${STAGE_TEXT[s]!.label.toLowerCase()}`).join(" · ")}</p>
+      )}
+      {offers.size > 0 && (
+        <p><span className="text-ink-3">Sells: </span>{[...offers].sort((a, b) => b[1] - a[1]).map(([o, n]) => `${featureValue("offer", o)} (${n})`).join(" · ")}</p>
+      )}
+    </div>
+  );
+}
+
+function LowConfidenceNote() {
+  return (
+    <details className="mb-4 rounded-xl border border-line px-4 py-3 text-sm">
+      <summary className="cursor-pointer font-medium">Why every idea says "low confidence"</summary>
+      <div className="mt-2 flex flex-col gap-2 text-ink-2">
+        <p>Confidence is how much real evidence backs an idea, not how good it is. Right now these rest mostly on your Brand Brain. It goes up when:</p>
+        <ul className="list-inside list-disc">
+          <li><span className="text-ink">Current news or buyer questions support the idea.</span> Each batch starts with a web scan of your market; ideas that cite two sources reach medium.</li>
+          <li><span className="text-ink">A competitor's similar post beat their usual.</span> <Link className="underline" to="/settings/competitors">Track competitors</Link> with Instagram, YouTube or TikTok accounts.</li>
+          <li><span className="text-ink">Your own posts show results.</span> After 5 posts with results on a platform, ideas can reach high. <Link className="underline" to="/settings/accounts">Connect accounts</Link> in your studio.</li>
+        </ul>
+      </div>
+    </details>
   );
 }
 

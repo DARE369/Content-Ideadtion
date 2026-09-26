@@ -29,19 +29,39 @@ export interface ScoredIdea extends Candidate {
   platform: Platform | null;
   components: ScoreComponents;
   evidenceN: number;
+  outside: { sources: number; proof: number };
   embedding: number[] | null;
 }
 
-export function toFeatures(idea: Reviewed, language: string): Features {
-  const f: Features = { ...idea.features, language };
+/** Match the model's product name to the Brand Brain's offers; anything else counts as brand-building. */
+export function matchOffer(sells: string | undefined, offers: { name: string }[]): string {
+  const s = (sells ?? "").trim().toLowerCase();
+  if (!s || s === "brand") return "brand";
+  const exact = offers.find((o) => o.name.toLowerCase() === s);
+  const loose = exact ?? offers.find((o) => s.includes(o.name.toLowerCase()) || o.name.toLowerCase().includes(s));
+  return loose?.name ?? "brand";
+}
+
+export function toFeatures(idea: Reviewed, language: string, offers: { name: string }[] = []): Features {
+  const f: Features = { ...idea.features, language, offer: matchOffer(idea.sells, offers) };
+  if (idea.funnel_stage) f.funnel_stage = idea.funnel_stage;
   if (f.length_bucket === "n/a") delete f.length_bucket;
   return f;
 }
 
+/** Independent cited sources that aren't generic trend feeds (those only count when clearly rising). */
+export function outsideSources(ctx: IdeationContext, ids: string[]): number {
+  return resolveEvidence(ctx, [...new Set(ids)]).filter((e) => {
+    if (e.kind !== "trend") return true;
+    const m = ctx.signals.find((s) => s.id === e.id)?.momentum ?? 0;
+    return m >= 0.6;
+  }).length;
+}
+
 export function scoreIdea(
   ctx: IdeationContext, idea: Reviewed, platform: Platform | null, est: EstimateIndex | null, W: number,
-): { components: ScoreComponents; score: number; evidenceN: number } {
-  const features = toFeatures(idea, ctx.brain.language);
+): { components: ScoreComponents; score: number; evidenceN: number; outside: { sources: number; proof: number } } {
+  const features = toFeatures(idea, ctx.brain.language, ctx.brain.offers);
   const posts = platform ? ctx.postsWithResults[platform] ?? 0 : 0;
   let L: number | null = null;
   let evidenceN = 0;
@@ -58,16 +78,17 @@ export function scoreIdea(
     W,
     G: goalFit(ctx.brain.goal, idea.features.format),
   };
-  return { components, score: opportunityScore(components, posts), evidenceN };
+  return { components, score: opportunityScore(components, posts), evidenceN, outside: { sources: outsideSources(ctx, idea.evidence_ids), proof: components.P } };
 }
 
-export async function precomputeWorkspace(db: Db, workspaceId: string, rng: Rng = seededRng(Date.now())): Promise<{ run_id: string; shortlisted: number } | null> {
+export async function precomputeWorkspace(db: Db, workspaceId: string, rng: Rng = seededRng(Date.now())): Promise<{ run_id: string; shortlisted: number; drafted: number; kept: number } | null> {
   const ctx = await loadContext(db, workspaceId);
   if (!ctx) return null;
   const runId = newId("run");
   const valid = validEvidenceIds(ctx);
 
-  const reviewed = (await critique(db, ctx, await generateIdeas(db, ctx))).map((i) => ({
+  const drafts = await generateIdeas(db, ctx);
+  const reviewed = (await critique(db, ctx, drafts)).map((i) => ({
     ...i, evidence_ids: i.evidence_ids.filter((id) => valid.has(id)),
   }));
   const embeddings = await embed(reviewed.map((i) => `${i.title}. ${i.core_idea}`)).catch(() => null);
@@ -83,8 +104,8 @@ export async function precomputeWorkspace(db: Db, workspaceId: string, rng: Rng 
     const platform = isPlatform(idea.platform) && ctx.platforms.includes(idea.platform) ? idea.platform : null;
     const s = scoreIdea(ctx, idea, platform, platform ? estimates.get(platform)! : null, whiteSpace(sim));
     scored.push({
-      id: newId("ide"), idea, platform, components: s.components, score: s.score, evidenceN: s.evidenceN,
-      features: toFeatures(idea, ctx.brain.language), embedding: emb,
+      id: newId("ide"), idea, platform, components: s.components, score: s.score, evidenceN: s.evidenceN, outside: s.outside,
+      features: toFeatures(idea, ctx.brain.language, ctx.brain.offers), embedding: emb,
     });
   }
 
@@ -117,7 +138,7 @@ export async function precomputeWorkspace(db: Db, workspaceId: string, rng: Rng 
       [s.id, workspaceId, runId, s.platform, s.idea.title, s.idea.why_now, s.idea.core_idea,
         JSON.stringify(resolveEvidence(ctx, s.idea.evidence_ids)), JSON.stringify(s.features), s.score,
         JSON.stringify(s.components), relativeLabel(s.score, allScores),
-        confidenceLabel(s.evidenceN, s.platform ? ctx.postsWithResults[s.platform] ?? 0 : 0),
+        confidenceLabel(s.evidenceN, s.platform ? ctx.postsWithResults[s.platform] ?? 0 : 0, s.outside),
         s.idea.content_type, s.idea.effort, s.idea.risks, slot ?? "explore", slot ? "shortlisted" : "candidate", toVector(s.embedding)],
     );
   }
@@ -128,7 +149,7 @@ export async function precomputeWorkspace(db: Db, workspaceId: string, rng: Rng 
   );
   await prepareDraftBriefs(db, workspaceId, ctx.platforms).catch((err) =>
     console.warn(`[precompute] draft briefs for ${workspaceId}: ${err instanceof Error ? err.message : err}`));
-  return { run_id: runId, shortlisted: selected.size };
+  return { run_id: runId, shortlisted: selected.size, drafted: drafts.length, kept: reviewed.length };
 }
 
 /**
@@ -145,24 +166,29 @@ export async function rescoreWorkspace(db: Db, workspaceId: string, rng: Rng = s
   );
   const runId = run.rows[0]?.run_id;
   if (!runId) return 0;
-  const rows = (await db.query<{ id: string; platform: string | null; features: Features; score_components: ScoreComponents; status: string }>(
-    `select id, platform, features, score_components, status from ideas
+  const rows = (await db.query<{ id: string; platform: string | null; features: Features; score_components: ScoreComponents; status: string; evidence: { kind: string }[] }>(
+    `select id, platform, features, score_components, status, evidence from ideas
      where run_id = $1 and status in ('candidate', 'shortlisted')`, [runId],
   )).rows;
 
-  const byPlatform = new Map<Platform | null, (Candidate & { components: ScoreComponents })[]>();
+  const byPlatform = new Map<Platform | null, (Candidate & { components: ScoreComponents; confidence: string })[]>();
   const perPlatform = Math.max(2, Math.ceil(SHORTLIST_SIZE / Math.max(1, ctx.platforms.length)));
   for (const r of rows) {
     const platform = isPlatform(r.platform) ? r.platform : null;
     const posts = platform ? ctx.postsWithResults[platform] ?? 0 : 0;
     let L: number | null = null;
+    let evidenceN = 0;
     if (platform && posts >= COLD_START_POSTS) {
       const c = combine(r.features, await loadEstimates(db, workspaceId, platform));
       L = probBeatsBaseline(c.mu, c.se);
+      evidenceN = c.evidenceN;
     }
     const components = { ...r.score_components, L };
     const score = opportunityScore(components, posts);
-    byPlatform.set(platform, [...(byPlatform.get(platform) ?? []), { id: r.id, features: r.features, score, components }]);
+    // Stored evidence has no momentum, so generic trend feeds don't count here.
+    const sources = (r.evidence ?? []).filter((e) => e.kind !== "own_post" && e.kind !== "trend").length;
+    const confidence = confidenceLabel(evidenceN, posts, { sources, proof: components.P ?? 0 });
+    byPlatform.set(platform, [...(byPlatform.get(platform) ?? []), { id: r.id, features: r.features, score, components, confidence }]);
   }
 
   const all = [...byPlatform.values()].flat();
@@ -183,8 +209,8 @@ export async function rescoreWorkspace(db: Db, workspaceId: string, rng: Rng = s
   for (const c of all) {
     const slot = slots.get(c.id);
     await db.query(
-      `update ideas set score = $2, score_components = $3, relative_label = $4, slot = $5, status = $6 where id = $1`,
-      [c.id, c.score, JSON.stringify(c.components), relativeLabel(c.score, allScores), slot ?? "explore", slot ? "shortlisted" : "candidate"],
+      `update ideas set score = $2, score_components = $3, relative_label = $4, slot = $5, status = $6, confidence = $7 where id = $1`,
+      [c.id, c.score, JSON.stringify(c.components), relativeLabel(c.score, allScores), slot ?? "explore", slot ? "shortlisted" : "candidate", c.confidence],
     );
   }
   return slots.size;

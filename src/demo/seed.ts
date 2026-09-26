@@ -1,3 +1,4 @@
+import { confidenceLabel } from "../scoring/opportunity.js";
 import type { Db } from "../db.js";
 import { Brief } from "../contracts/brief.js";
 import { newId } from "../lib/ids.js";
@@ -65,8 +66,8 @@ export async function seedDemoWorkspace(db: Db, now = new Date()): Promise<strin
   await db.query("insert into workspaces (id, studio_workspace_id, name) values ($1, $2, $3)", [ws, `demo_${ws}`, "Crumb & Co. (demo)"]);
   await db.query(
     `insert into brand_brains (workspace_id, website_url, brand_kit, goal, language, timezone, trends_geo, tone_words, pillars,
-       audience, offers, banned_topics, description, industry, country, social_links, competitor_suggestions, confirmed_at)
-     values ($1,$2,$3,'leads','en-NG','Africa/Lagos','NG',$4,$5,$6,$7,$8,$9,$10,'NG',$11,$12, now())`,
+       audience, offers, banned_topics, description, industry, country, social_links, competitor_suggestions, buyer_questions, objections, confirmed_at)
+     values ($1,$2,$3,'leads','en-NG','Africa/Lagos','NG',$4,$5,$6,$7,$8,$9,$10,'NG',$11,$12,$13,$14, now())`,
     [ws, WEBSITE, JSON.stringify({ colors: ["#F4A7B9", "#3B2A20", "#FFF6EC"], fonts: ["Fraunces"] }),
       ["warm", "expert", "honest", "playful"],
       ["Pricing & the business of baking", "Custom cake craft", "Behind the scenes", "Client stories"],
@@ -86,7 +87,9 @@ export async function seedDemoWorkspace(db: Db, now = new Date()): Promise<strin
         { name: "The Frosting Room", website: "https://frostingroom.example", why: "Celebration cakes in Lekki and Ikoyi", overlap: ["Custom celebration cakes"], market: "Lagos", confidence: "medium", handles: { instagram: "thefrostingroom" } },
         { name: "Cake Republic Abuja", website: "https://cakerepublic.example", why: "Similar custom cakes, different city; a useful benchmark", overlap: ["Custom celebration cakes"], market: "Abuja", confidence: "medium", handles: { instagram: "cakerepublic.abj" } },
         { name: "Layers by Nneka", website: null, why: "Home baker brand with a large pricing-tips following", overlap: ["Cake pricing sheet for home bakers"], market: "Nigeria", confidence: "low", handles: { tiktok: "layersbynneka" } },
-      ])],
+      ]),
+      ["How much is a 3-tier wedding cake for 200 guests?", "How far ahead should we book for December?", "Do you deliver to Lekki, and how much is delivery?"],
+      ["Worried the cake won't survive an outdoor party in the heat", "Prices seem high next to home bakers"]],
   );
 
   const accounts: Record<string, string> = {};
@@ -296,17 +299,24 @@ export async function seedDemoWorkspace(db: Db, now = new Date()): Promise<strin
     ["instagram", "Why we stopped offering free tastings", "A story post to test: you have little data on story openers, and this one sets up pricing.", "A short honest story about the cost of free tastings and what replaced them.", "story", "reel", "low", [...ev.own(2)], "Behind the scenes", [0.7, 0.2, 0.3, 0.75]],
     ["tiktok", "What ₦30k actually gets you in a custom cake", "Answers a comment directly and reuses your best-performing hook.", "Show three ₦30k options side by side with what changes the price.", "price_reveal", "vertical_video", "low", [...ev.question(4), ...ev.own(0)], "Pricing & the business of baking", [0.85, 0.3, 0.4, 0.5]],
   ];
+  // What each card sells and for which buyer stage (same order as `cards`).
+  const money: [string, string][] = [
+    ["Custom celebration cakes", "consideration"], ["Custom celebration cakes", "consideration"], ["Custom celebration cakes", "decision"],
+    ["Custom celebration cakes", "awareness"], ["Cake pricing sheet for home bakers", "awareness"], ["Custom celebration cakes", "decision"],
+    ["Free tasting box (weddings)", "consideration"], ["Custom celebration cakes", "decision"],
+  ];
   const runId = newId("run");
-  for (const [platform, title, why, core, hook, format, effort, evidence, pillar, [F, P, M, W]] of cards) {
+  for (const [n, [platform, title, why, core, hook, format, effort, evidence, pillar, [F, P, M, W]]] of cards.entries()) {
     const G = format === "carousel" ? 0.9 : format === "short" ? 0.6 : 0.7;
     await db.query(
       `insert into ideas (id, workspace_id, run_id, mode, platform, title, why_now, core_idea, evidence, features, score_components,
-         content_type, effort, risks, slot, status, expires_at)
-       values ($1,$2,$3,'give_me_ideas',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'explore','candidate', now() + interval '14 days')`,
+         content_type, effort, risks, slot, status, confidence, expires_at)
+       values ($1,$2,$3,'give_me_ideas',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'explore','candidate',$14, now() + interval '14 days')`,
       [newId("ide"), ws, runId, platform, title, why, core, JSON.stringify(evidence),
-        JSON.stringify({ hook_type: hook, format, pillar, idea_source: evidence.length && (evidence[0] as { kind: string }).kind === "comment" ? "audience_question" : "own_winner", cta_type: "link_in_bio", visual_style: "talking_head", length_bucket: "16-30s", language: "en-NG" }),
+        JSON.stringify({ hook_type: hook, format, pillar, idea_source: evidence.length && (evidence[0] as { kind: string }).kind === "comment" ? "audience_question" : "own_winner", cta_type: "link_in_bio", visual_style: "talking_head", length_bucket: "16-30s", language: "en-NG", offer: money[n]![0], funnel_stage: money[n]![1] }),
         JSON.stringify({ L: null, F, P, M, W, G }), format, effort,
-        hook === "price_reveal" ? ["Share real numbers only if you're comfortable; clients may ask for the same price"] : []],
+        hook === "price_reveal" ? ["Share real numbers only if you're comfortable; clients may ask for the same price"] : [],
+        confidenceLabel(0, 0, { sources: (evidence as { kind: string }[]).filter((e) => e.kind !== "own_post").length, proof: P })],
     );
   }
   await rescoreWorkspace(db, ws, rng);

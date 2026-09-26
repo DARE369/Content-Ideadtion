@@ -36,6 +36,10 @@ export const BrandBrain = z.object({
   tone_words: z.array(z.string()).max(8),
   pillars: z.array(z.string()).min(1).max(6),
   audience: z.string(),
+  /** Questions buyers ask before they buy, in their words. */
+  buyer_questions: z.array(z.string()).max(15).default([]),
+  /** What makes buyers hesitate: price, risk, switching cost, trust. */
+  objections: z.array(z.string()).max(15).default([]),
   offers: z.array(Offer),
   banned_topics: z.array(z.string()),
 });

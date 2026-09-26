@@ -56,9 +56,19 @@ export function relativeLabel(score: number, all: number[]): "top_third" | "midd
   return rank < 1 / 3 ? "top_third" : rank < 2 / 3 ? "middle_third" : "bottom_third";
 }
 
-/** Confidence from how much of the brand's own evidence backs the estimate. */
-export function confidenceLabel(evidenceN: number, postsWithResults: number): "low" | "medium" | "high" {
-  if (postsWithResults < COLD_START_POSTS || evidenceN < 2) return "low";
-  if (evidenceN < 6) return "medium";
-  return "high";
+/**
+ * How much real evidence backs the estimate.
+ * - high: only from the brand's own results (5+ posts on the platform, 6+ similar posts).
+ * - medium: some own results, or outside proof: 2+ independent cited sources
+ *   (market news, buyer questions, competitor posts) or a competitor post at 2.5x+.
+ * - low: nothing cited yet; the idea rests on the Brand Brain alone.
+ */
+export function confidenceLabel(
+  evidenceN: number, postsWithResults: number, outside: { sources: number; proof: number } = { sources: 0, proof: 0 },
+): "low" | "medium" | "high" {
+  const own = postsWithResults >= COLD_START_POSTS;
+  if (own && evidenceN >= 6) return "high";
+  if (own && evidenceN >= 2) return "medium";
+  if (outside.sources >= 2 || outside.proof >= 0.55) return "medium";
+  return "low";
 }

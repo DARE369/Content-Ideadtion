@@ -10,6 +10,7 @@ import { useToast } from "../components/Toast";
 import { WebsiteAnalysis } from "../components/WebsiteAnalysis";
 import { Button, Card, ErrorNote, Field, inputClass, Skeleton } from "../components/ui";
 import { api } from "../lib/api";
+import { IDEA_STEPS } from "../lib/format";
 import type { AnalyseInput, BrandBrain, BrandDraft, Goal } from "../lib/types";
 import { useAppConfig, useSummary, useWs } from "../lib/workspace";
 
@@ -17,7 +18,7 @@ const STEPS = ["Your website", "Your brand", "Competitors", "First ideas"];
 
 export const EMPTY_BRAIN: BrandBrain = {
   website_url: null, brand_kit: { colors: [], fonts: [] }, social_links: [], goal: "engagement", language: "en-GB",
-  tone_words: [], pillars: [], audience: "", offers: [], banned_topics: [],
+  tone_words: [], pillars: [], audience: "", buyer_questions: [], objections: [], offers: [], banned_topics: [],
 };
 
 /** Fill any gaps so older drafts and partial research still render in the form. */
@@ -279,7 +280,7 @@ function FirstIdeasStep() {
           <div className="grid size-10 place-items-center rounded-full bg-good-soft text-good"><Check className="size-5" aria-hidden /></div>
           <h1 className="mt-4 text-xl font-semibold">{gen.data.ideas.length} ideas are ready</h1>
           <p className="mt-1 text-sm text-ink-2">
-            Built around what you sell. Pick one and we'll write a brief your studio can shoot. New ideas arrive every night, and they get sharper as your posts come in.
+            The best {gen.data.ideas.length}{gen.data.drafted ? ` of ${gen.data.drafted} drafts` : ""}, each tied to what you sell and where your buyer is. Pick one and we'll write a brief your studio can shoot. New ideas arrive every night, and they get sharper as your posts come in.
           </p>
           <AccountsNote />
           <Button className="mt-6" variant="primary" size="lg" onClick={finish}>See this week's ideas <ArrowRight className="size-4" aria-hidden /></Button>
@@ -293,16 +294,9 @@ function FirstIdeasStep() {
       ) : (
         <>
           <h1 className="text-xl font-semibold">Writing your first ideas…</h1>
-          <p className="mt-1 text-sm text-ink-2">Usually under a minute. Please keep this tab open.</p>
+          <p className="mt-1 text-sm text-ink-2">Usually one to two minutes. Please keep this tab open.</p>
           <div className="mt-6">
-            <NarratedProgress intervalMs={9000} steps={[
-              "Reading your brand and what you sell",
-              "Looking at what already works for you",
-              "Checking competitor winners and trends",
-              "Writing 15 ideas",
-              "An editor is cutting the weak ones",
-              "Scoring and picking this week's shortlist",
-            ]} />
+            <NarratedProgress intervalMs={14000} steps={IDEA_STEPS} />
           </div>
         </>
       )}

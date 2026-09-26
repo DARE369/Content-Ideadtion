@@ -20,6 +20,11 @@ describe("opportunity score", () => {
     expect(confidenceLabel(10, 3)).toBe("low");
     expect(confidenceLabel(3, 20)).toBe("medium");
     expect(confidenceLabel(8, 20)).toBe("high");
+    // Before the brand has results: outside evidence can reach medium, never high.
+    expect(confidenceLabel(0, 0, { sources: 1, proof: 0 })).toBe("low");
+    expect(confidenceLabel(0, 0, { sources: 2, proof: 0 })).toBe("medium");
+    expect(confidenceLabel(0, 0, { sources: 0, proof: 0.7 })).toBe("medium");
+    expect(confidenceLabel(0, 0, { sources: 9, proof: 1 })).toBe("medium");
   });
   it("proof and goal fit", () => {
     expect(proofFromOutliers([])).toBe(0);
@@ -62,5 +67,26 @@ describe("momentum", () => {
     expect(parseApproxTraffic("2,000+")).toBe(2000);
     expect(parseApproxTraffic("200K+")).toBe(200000);
     expect(momentumFromTraffic(1_000_000)).toBeCloseTo(1);
+  });
+});
+
+describe("money and market", () => {
+  it("matches the product an idea sells to the Brand Brain, else brand-building", async () => {
+    const { matchOffer } = await import("../src/ideation/precompute.js");
+    const offers = [{ name: "Production monitoring platform" }, { name: "Digital readiness assessment" }];
+    expect(matchOffer("production monitoring platform", offers)).toBe("Production monitoring platform");
+    expect(matchOffer("Free Digital readiness assessment", offers)).toBe("Digital readiness assessment");
+    expect(matchOffer("brand", offers)).toBe("brand");
+    expect(matchOffer("Something else", offers)).toBe("brand");
+    expect(matchOffer(undefined, offers)).toBe("brand");
+  });
+
+  it("market items lose momentum with age", async () => {
+    const { marketMomentum } = await import("../src/research/market.js");
+    const now = new Date("2026-09-26T00:00:00Z");
+    expect(marketMomentum(0.9, "2026-09-20", now)).toBe(0.9);
+    expect(marketMomentum(0.9, "2026-08-20", now)).toBe(0.72);
+    expect(marketMomentum(0.9, "", now)).toBe(0.72);
+    expect(marketMomentum(0.9, "2025-01-01", now)).toBe(0.27);
   });
 });

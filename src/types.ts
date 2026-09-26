@@ -19,6 +19,8 @@ export const FEATURE_KEYS = [
   "cta_type",
   "visual_style",
   "language",
+  "funnel_stage",
+  "offer",
 ] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 export type Features = Partial<Record<FeatureKey, string>>;

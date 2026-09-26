@@ -30,6 +30,8 @@ export interface BrandBrain {
   tone_words: string[];
   pillars: string[];
   audience: string;
+  buyer_questions?: string[];
+  objections?: string[];
   offers: Offer[];
   banned_topics: string[];
   timezone?: string;
