@@ -99,6 +99,24 @@ function limits(timeoutMs: number | undefined): Anthropic.RequestOptions | undef
 }
 
 export async function structured<S extends z.ZodType>(req: StructuredRequest<S>): Promise<z.infer<S>> {
+  const started = Date.now();
+  try {
+    return await structuredOnce(req);
+  } catch (err) {
+    // One more try when the answer came back incomplete or the service was busy, if time allows.
+    const msg = (err as Error)?.message ?? "";
+    const retryable = /did not match the schema|truncated at max_tokens|Failed to parse structured output/.test(msg)
+      || (err instanceof Anthropic.APIError && (err.status === 529 || (err.status ?? 0) >= 500));
+    const left = req.timeoutMs ? req.timeoutMs - (Date.now() - started) : Infinity;
+    if (!retryable || left < 15_000) throw err;
+    console.warn(`[${req.task}] retrying once: ${msg.slice(0, 300)}`);
+    // A cut-off answer (or JSON that ends early) gets more room; the SDK refuses non-streaming calls above ~21k.
+    const cutOff = /truncated|as JSON/.test(msg);
+    return structuredOnce({ ...req, ...(req.timeoutMs ? { timeoutMs: left } : {}), ...(cutOff ? { maxTokens: Math.min(20_000, Math.round((req.maxTokens ?? 16_000) * 1.5)) } : {}) });
+  }
+}
+
+async function structuredOnce<S extends z.ZodType>(req: StructuredRequest<S>): Promise<z.infer<S>> {
   await assertBudget(req);
   const model = modelFor(req.tier);
   const { effort: tierEffort, ...extra } = tierParams(model, req.tier);
