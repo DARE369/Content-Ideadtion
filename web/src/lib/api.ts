@@ -43,7 +43,9 @@ function friendlyError(status: number, data: unknown): string {
     const issues = (data as { issues: { path: (string | number)[]; message: string }[] }).issues;
     return issues.map((i) => `${i.path.join(".") || "request"}: ${i.message}`).join("; ");
   }
-  return msg || `Something went wrong (${status}).`;
+  if (msg) return msg;
+  if (status >= 500) return "The server hit a problem before it could answer. Open /healthz/deep on this site for a setup check.";
+  return `Something went wrong (${status}).`;
 }
 
 const get = <T,>(p: string) => request<T>("GET", p);

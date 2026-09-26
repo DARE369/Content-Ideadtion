@@ -18,6 +18,7 @@ import { exportBrief, exportIdeas, type ExportFormat } from "../ideation/export.
 import { refineIdea } from "../ideation/refine.js";
 import { enqueue } from "../jobs/queue.js";
 import { registerUiRoutes } from "./uiRoutes.js";
+import { explain } from "./errors.js";
 import { drainFor, requeueStuck, tickSchedule, tokenResolver } from "../jobs/runner.js";
 import { newId } from "../lib/ids.js";
 import { deleteWorkspace, disconnectAccount } from "../privacy/deletion.js";
@@ -58,6 +59,34 @@ export function createApp(db: Db): Hono {
 
   app.get("/healthz", (c) => c.json({ ok: true }));
 
+  /** Setup check: settings, database, tables and keys. Reports presence only, never values. */
+  app.get("/healthz/deep", async (c) => {
+    const checks: { check: string; ok: boolean; detail?: string }[] = [];
+    const run = async (check: string, fn: () => Promise<string | void>) => {
+      try {
+        const detail = await fn();
+        checks.push({ check, ok: true, ...(detail ? { detail } : {}) });
+      } catch (err) {
+        checks.push({ check, ok: false, detail: explain(err) ?? (err instanceof Error ? err.message : String(err)) });
+      }
+    };
+    let cfg: ReturnType<typeof config> | null = null;
+    await run("settings", async () => { cfg = config(); return `auth mode: ${cfg.AUTH_MODE}`; });
+    await run("database connection", async () => { await db.query("select 1"); });
+    await run("database tables", async () => {
+      const r = await db.query<{ n: number }>("select count(*)::int as n from workspaces");
+      return `${r.rows[0]?.n ?? 0} workspaces`;
+    });
+    await run("pgvector", async () => {
+      const r = await db.query("select 1 from pg_extension where extname = 'vector'");
+      if (!r.rowCount) throw new Error("The 'vector' extension isn't enabled (Database → Extensions in Supabase).");
+    });
+    checks.push({ check: "Anthropic key", ok: !!cfg && !!(cfg as { ANTHROPIC_API_KEY?: string }).ANTHROPIC_API_KEY, detail: "needed for drafting, ideas, briefs and reports" });
+    checks.push({ check: "YouTube key", ok: !!cfg && !!(cfg as { YOUTUBE_API_KEY?: string }).YOUTUBE_API_KEY, detail: "optional: competitor and trending YouTube data" });
+    const ok = checks.filter((x) => !["Anthropic key", "YouTube key"].includes(x.check)).every((x) => x.ok);
+    return c.json({ ok, checks }, ok ? 200 : 503);
+  });
+
   /**
    * Serverless scheduler: Vercel Cron (or any external cron) calls this with
    * `Authorization: Bearer CRON_SECRET`. It enqueues due recurring work, then
@@ -87,7 +116,8 @@ export function createApp(db: Db): Hono {
     if (err instanceof BudgetExceededError) return c.json({ error: err.message }, 429);
     if (err instanceof RefusalError) return c.json({ error: err.message }, 422);
     console.error(err);
-    return c.json({ error: "internal error" }, 500);
+    const hint = explain(err);
+    return c.json({ error: hint ?? "Something went wrong on the server. Open /healthz/deep for a setup check, or see the function logs." }, hint ? 503 : 500);
   });
 
   registerUiRoutes(app, db);

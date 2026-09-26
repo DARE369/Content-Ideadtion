@@ -21,15 +21,36 @@ const Env = z.object({
   DB_POOL_MAX: z.coerce.number().int().positive().default(10),
   CRON_SECRET: z.string().optional(),
   /** "open" lets the web app call /v1 without a token. Temporary until user auth exists. */
-  AUTH_MODE: z.enum(["token", "open"]).default("token"),
+  AUTH_MODE: z.preprocess((v) => (typeof v === "string" ? v.toLowerCase() : v), z.enum(["token", "open"])).default("token"),
 });
 
 export type Config = z.infer<typeof Env>;
 
 let cached: Config | undefined;
 
+/** A setting that can't be read. The message names the variable, never its value. */
+export class ConfigError extends Error {}
+
+/** Dashboards make it easy to paste stray spaces or quotes; ignore them, and treat empty as unset. */
+function cleanEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, raw] of Object.entries(env)) {
+    if (raw === undefined) continue;
+    const v = raw.trim().replace(/^(['"])(.*)\1$/, "$2").trim();
+    if (v !== "") out[k] = v;
+  }
+  return out;
+}
+
 export function config(): Config {
-  cached ??= Env.parse(process.env);
+  if (!cached) {
+    const r = Env.safeParse(cleanEnv(process.env));
+    if (!r.success) {
+      const names = [...new Set(r.error.issues.map((i) => String(i.path[0])))];
+      throw new ConfigError(`These environment variables have values the app can't use: ${names.join(", ")}. Check them in your hosting settings.`);
+    }
+    cached = r.data;
+  }
   return cached;
 }
 

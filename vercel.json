@@ -5,7 +5,7 @@
   "rewrites": [
     { "source": "/v1/(.*)", "destination": "/api" },
     { "source": "/cron/(.*)", "destination": "/api" },
-    { "source": "/healthz", "destination": "/api" },
+    { "source": "/healthz(.*)", "destination": "/api" },
     { "source": "/((?!assets/|favicon\\.svg).*)", "destination": "/index.html" }
   ],
   "headers": [
