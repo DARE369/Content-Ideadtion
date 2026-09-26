@@ -15,6 +15,34 @@ keyless public feeds and the studio's Supabase Postgres. There is no scraping an
 
 Every published post carries the `idea_id` and `brief_id` it came from. That link is what lets the loop learn.
 
+## The web app
+
+`web/` is a React app (Vite, TypeScript, Tailwind, TanStack Query, Recharts). It's built into `public/` and served by
+the same Vercel project as the API.
+
+| Screen | What you do there |
+| --- | --- |
+| Welcome | Create a brand, or open the demo bakery in one click |
+| Setup | Website, goal and language → AI-drafted Brand Brain you edit and confirm → competitors → your first ideas |
+| This week | **Make this week's posts** (Autopilot) or pick from 5–10 Idea Cards: proven vs. test, "likely top third", evidence, and why each is ranked where it is |
+| Refine | Type an idea: the verdict streams in, then a sharper version with 3 alternatives, then ready-to-shoot versions per platform |
+| Briefs | What's with the studio, what's in production, drafts; each brief reads like a production doc with copy buttons and exports |
+| Analytics | Typical post, floor and hit rate against a month ago; week-by-week chart; what's working; every post as "2.1× your usual"; a match inbox for posts published outside the studio |
+| Reports | The weekly report; every claim links to the posts behind it; "what's next" is already applied |
+| Settings | Brand Brain, competitors, accounts (disconnect deletes data), AI spend, workspace |
+
+**Demo mode:** `POST /v1/demo` (the "Explore the demo" button) seeds a fictional bakery with 12 weeks of posts, run
+through the real analytics. Everything is explorable without a Claude key or connected accounts.
+
+**Sign-in is not built yet.** Set `AUTH_MODE=open` so the browser can call `/v1` without a token. Anyone with the URL
+can then use the app, so keep the deployment URL private until auth lands. `AUTH_MODE=token` (the default) keeps
+the studio-only API.
+
+```bash
+npm run dev          # API on :8787 (set AUTH_MODE=open in .env)
+npm run web:dev      # web app on :5173, proxies /v1 to the API
+```
+
 ## What's in the box
 
 | Stage | Where | What it does |
@@ -86,8 +114,9 @@ npm run worker:dev           # job worker (nightly precompute, snapshots, report
 
 ### Deploy on Vercel
 
-The API runs as one Vercel Function (`api/index.js` → the compiled Hono app). The background worker becomes a cron
-route. Pages at `/` are static; everything else is rewritten to the function.
+The API runs as one Vercel Function (`api/index.js` → the compiled Hono app), and the web app is static files in
+`public/`. `/v1/*`, `/cron/*` and `/healthz` go to the function; every other path serves the web app. The
+background worker becomes a cron route.
 
 1. **Database first:** Vercel does not run migrations. From your machine, set `DATABASE_URL` to the Supabase
    connection string and run `npm run migrate`. You can also paste the two files in `supabase/migrations/` into
@@ -98,7 +127,8 @@ route. Pages at `/` are static; everything else is rewritten to the function.
    - `DATABASE_URL`: use Supabase's **Session pooler** string (port 5432 on `*.pooler.supabase.com`), not the
      transaction pooler, because the app sets `search_path` per session.
    - `DB_POOL_MAX=3` (serverless functions should keep few connections).
-   - `API_TOKEN`: any long random string. Send it as `Authorization: Bearer …` on every `/v1` call.
+   - `AUTH_MODE=open` while the web app has no sign-in (see "The web app" above), otherwise `API_TOKEN`: any long
+     random string, sent as `Authorization: Bearer …` on every `/v1` call.
    - `CRON_SECRET`: a long random string. Vercel Cron sends it automatically.
    - `ANTHROPIC_API_KEY`, `YOUTUBE_API_KEY`, and optionally `MODEL_FAST`, `MODEL_STRATEGY`,
      `WORKSPACE_DAILY_BUDGET_USD`, `HTTP_USER_AGENT`.

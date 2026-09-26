@@ -4,3 +4,7 @@ dist
 .env.*
 !.env.example
 coverage
+
+# Built by `npm run web:build` (Vite output served by Vercel)
+/public/
+*.tsbuildinfo

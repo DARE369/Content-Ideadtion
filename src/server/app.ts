@@ -17,6 +17,7 @@ import { connectedPlatforms } from "../ideation/context.js";
 import { exportBrief, exportIdeas, type ExportFormat } from "../ideation/export.js";
 import { refineIdea } from "../ideation/refine.js";
 import { enqueue } from "../jobs/queue.js";
+import { registerUiRoutes } from "./uiRoutes.js";
 import { drainFor, requeueStuck, tickSchedule, tokenResolver } from "../jobs/runner.js";
 import { newId } from "../lib/ids.js";
 import { deleteWorkspace, disconnectAccount } from "../privacy/deletion.js";
@@ -72,6 +73,8 @@ export function createApp(db: Db): Hono {
   });
 
   app.use("/v1/*", async (c, next) => {
+    // Temporary: the web app has no sign-in yet, so AUTH_MODE=open lets it through.
+    if (config().AUTH_MODE === "open") return next();
     const token = config().API_TOKEN;
     if (!token) throw new HTTPException(500, { message: "API_TOKEN is not configured" });
     if (!authorized(c.req.header("authorization"), token)) throw new HTTPException(401, { message: "unauthorized" });
@@ -86,6 +89,8 @@ export function createApp(db: Db): Hono {
     console.error(err);
     return c.json({ error: "internal error" }, 500);
   });
+
+  registerUiRoutes(app, db);
 
   // --- Workspaces and the Brand Brain ------------------------------------------------
 

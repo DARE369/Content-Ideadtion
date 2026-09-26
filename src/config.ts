@@ -20,6 +20,8 @@ const Env = z.object({
   PORT: z.coerce.number().int().default(8787),
   DB_POOL_MAX: z.coerce.number().int().positive().default(10),
   CRON_SECRET: z.string().optional(),
+  /** "open" lets the web app call /v1 without a token. Temporary until user auth exists. */
+  AUTH_MODE: z.enum(["token", "open"]).default("token"),
 });
 
 export type Config = z.infer<typeof Env>;
