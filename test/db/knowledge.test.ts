@@ -79,6 +79,8 @@ const fake = {
       create: async (p: { requests: { custom_id: string; params: { messages: { content: Anthropic.ContentBlockParam[] }[] } }[] }) => {
         const id = `msgbatch_${batches.size + 1}`;
         calls.push("batch");
+        // Same rule as the real Batch API.
+        for (const r of p.requests) if (!/^[a-zA-Z0-9_-]{1,64}$/.test(r.custom_id)) throw new Error(`requests.0.custom_id: String should match pattern (${r.custom_id})`);
         batches.set(id, p.requests.map((r) => ({ custom_id: r.custom_id, content: r.params.messages[0]!.content })));
         return { id };
       },

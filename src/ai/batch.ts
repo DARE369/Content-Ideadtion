@@ -16,11 +16,16 @@ export interface BatchItem {
   content: Anthropic.MessageParam["content"];
 }
 
+export const BATCH_ID = /^[a-zA-Z0-9_-]{1,64}$/;
+
 export async function submitBatch<S extends z.ZodType>(
   db: Db,
   opts: { task: string; handler: string; tier: Tier; system: string[]; schema: S; items: BatchItem[]; workspaceId: string | null; maxTokens?: number },
 ): Promise<string | null> {
   if (opts.items.length === 0) return null;
+  // The Batch API only accepts these ids; fail here (and in tests), not on the live service.
+  const bad = opts.items.find((it) => !BATCH_ID.test(it.custom_id));
+  if (bad) throw new Error(`invalid batch custom_id "${bad.custom_id}"`);
   const model = modelFor(opts.tier);
   const format = zodOutputFormat(opts.schema);
   const batch = await anthropic().messages.batches.create({

@@ -547,7 +547,7 @@ export async function startScan(db: Db, ws: string, scanId: string, opts: { budg
   let groups: Record<string, string[]> = {};
   if (rest.length) {
     try {
-      ({ batchId, groups } = await extractInBatch(db, ws, chunk(units(rest), PAGES_PER_REQUEST), `kc:${scanId}`));
+      ({ batchId, groups } = await extractInBatch(db, ws, chunk(units(rest), PAGES_PER_REQUEST), `kc-${scanId}`));
     } catch (err) {
       console.warn(`[scan ${scanId}] batch submit failed: ${(err as Error).message}`);
       lastError = err;
@@ -586,9 +586,9 @@ async function applyCards(db: Db, ws: string, page: SnapshotRow, cards: Extracte
 // 3. Progress (polled by the page) and batch results
 // ---------------------------------------------------------------------------
 
-/** Batch handler for the job queue fallback (custom id "kc:<scan>:<n>"). */
+/** Batch handler for the job queue fallback (custom id "kc-<scan>-<n>"; older scans used ":"). */
 export async function knowledgeBatchHandler(db: Db, customId: string, output: unknown): Promise<void> {
-  const [, scanId] = customId.split(":");
+  const scanId = customId.split(/[:-]/)[1];
   const scan = (await db.query<{ workspace_id: string; batch_groups: Record<string, string[]> }>("select workspace_id, batch_groups from scan_runs where id = $1", [scanId])).rows[0];
   if (!scan) return;
   const ids = scan.batch_groups[customId] ?? [];

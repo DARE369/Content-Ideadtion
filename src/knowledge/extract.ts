@@ -81,7 +81,7 @@ export async function extractNow(db: Db, ws: string, units: ExtractUnit[], task:
 export async function extractInBatch(db: Db, ws: string, groupsOfUnits: ExtractUnit[][], customPrefix: string): Promise<{ batchId: string | null; groups: Record<string, string[]> }> {
   const groups: Record<string, string[]> = {};
   const items: BatchItem[] = groupsOfUnits.map((units, n) => {
-    const id = `${customPrefix}:${n}`;
+    const id = `${customPrefix}-${n}`;
     groups[id] = units.map((u) => u.id);
     return { custom_id: id, content: unitContent(units) };
   });
