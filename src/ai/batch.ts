@@ -1,9 +1,8 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { z } from "zod";
 import type { Db } from "../db.js";
 import { enqueue } from "../jobs/queue.js";
-import { anthropic, cachedSystem, logCost, modelFor, type Tier } from "./client.js";
+import { anthropic, cachedSystem, logCost, modelFor, outputFormat, type Tier } from "./client.js";
 
 /**
  * Background work (competitor post deconstruction, vision tagging) goes through
@@ -27,7 +26,7 @@ export async function submitBatch<S extends z.ZodType>(
   const bad = opts.items.find((it) => !BATCH_ID.test(it.custom_id));
   if (bad) throw new Error(`invalid batch custom_id "${bad.custom_id}"`);
   const model = modelFor(opts.tier);
-  const format = zodOutputFormat(opts.schema);
+  const format = outputFormat(opts.schema);
   const batch = await anthropic().messages.batches.create({
     requests: opts.items.map((it) => ({
       custom_id: it.custom_id,

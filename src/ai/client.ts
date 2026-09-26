@@ -98,6 +98,33 @@ function limits(timeoutMs: number | undefined): Anthropic.RequestOptions | undef
   return timeoutMs ? { signal: AbortSignal.timeout(timeoutMs), timeout: timeoutMs, maxRetries: 1 } : undefined;
 }
 
+/**
+ * zodOutputFormat, with enum lists enforced. SDK 0.128's strict-schema transform keeps only a few
+ * keywords and moves `enum` into the description, so the model could answer outside a list and the
+ * parse then failed. Put each list back as a real constraint.
+ */
+export function outputFormat<S extends z.ZodType>(schema: S): ReturnType<typeof zodOutputFormat<S>> {
+  const fmt = zodOutputFormat(schema);
+  restoreEnums(fmt.schema);
+  return fmt;
+}
+
+function restoreEnums(node: unknown): void {
+  if (Array.isArray(node)) { node.forEach(restoreEnums); return; }
+  if (!node || typeof node !== "object") return;
+  const n = node as Record<string, unknown>;
+  if (n.type === "string" && typeof n.description === "string" && !n.enum) {
+    const m = /enum: (\[(?:"(?:[^"\\]|\\.)*",?)*\])/.exec(n.description);
+    if (m) {
+      try {
+        const values = JSON.parse(m[1]!) as unknown[];
+        if (values.length && values.every((v) => typeof v === "string")) n.enum = values;
+      } catch { /* leave it as a hint */ }
+    }
+  }
+  for (const v of Object.values(n)) restoreEnums(v);
+}
+
 export async function structured<S extends z.ZodType>(req: StructuredRequest<S>): Promise<z.infer<S>> {
   const started = Date.now();
   try {
@@ -127,7 +154,7 @@ async function structuredOnce<S extends z.ZodType>(req: StructuredRequest<S>): P
     max_tokens: req.maxTokens ?? 16000,
     system: cachedSystem(req.system),
     messages: [{ role: "user", content: req.content }],
-    output_config: { format: zodOutputFormat(req.schema), ...(effort ? { effort } : {}) },
+    output_config: { format: outputFormat(req.schema), ...(effort ? { effort } : {}) },
     ...extra,
   }, limits(req.timeoutMs));
   await logCost(req, model, res.usage, Date.now() - started);

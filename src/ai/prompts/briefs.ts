@@ -22,7 +22,7 @@ export const AdapterOutput = z.object({
   visual_direction: z.object({ style: z.string(), shots: z.array(z.string()) }),
   script_or_copy: z.string(),
   caption: z.string(),
-  cta: z.object({ type: z.enum(CTA_TYPES), text: z.string() }),
+  cta: z.object({ type: z.enum(CTA_TYPES).catch("none"), text: z.string() }),
   length_seconds_min: z.number().nullable(),
   length_seconds_max: z.number().nullable(),
   title: z.string().optional().describe("required for YouTube"),
