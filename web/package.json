@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "vercel-build": "echo 'This project must be deployed from the repository root, not web/. In Vercel: Settings > Build and Deployment > Root Directory: leave it empty, Framework Preset: Other.' && exit 1"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.0",
