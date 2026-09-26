@@ -65,17 +65,28 @@ export async function seedDemoWorkspace(db: Db, now = new Date()): Promise<strin
   await db.query("insert into workspaces (id, studio_workspace_id, name) values ($1, $2, $3)", [ws, `demo_${ws}`, "Crumb & Co. (demo)"]);
   await db.query(
     `insert into brand_brains (workspace_id, website_url, brand_kit, goal, language, timezone, trends_geo, tone_words, pillars,
-       audience, offers, banned_topics, confirmed_at)
-     values ($1,$2,$3,'leads','en-NG','Africa/Lagos','NG',$4,$5,$6,$7,$8, now())`,
+       audience, offers, banned_topics, description, industry, country, social_links, competitor_suggestions, confirmed_at)
+     values ($1,$2,$3,'leads','en-NG','Africa/Lagos','NG',$4,$5,$6,$7,$8,$9,$10,'NG',$11,$12, now())`,
     [ws, WEBSITE, JSON.stringify({ colors: ["#F4A7B9", "#3B2A20", "#FFF6EC"], fonts: ["Fraunces"] }),
       ["warm", "expert", "honest", "playful"],
       ["Pricing & the business of baking", "Custom cake craft", "Behind the scenes", "Client stories"],
       "Couples and party planners in Lagos ordering custom cakes, plus home bakers who follow for pricing advice",
       JSON.stringify([
-        { name: "Custom celebration cakes", url: `${WEBSITE}/order`, price: "from ₦45,000" },
-        { name: "Cake pricing sheet for home bakers", url: `${WEBSITE}/pricing-sheet`, price: "₦7,500" },
+        { name: "Custom celebration cakes", description: "Wedding, birthday and corporate cakes made to order", revenue_role: "core", url: `${WEBSITE}/order`, price: "from ₦45,000" },
+        { name: "Cake pricing sheet for home bakers", description: "Spreadsheet template and guide", revenue_role: "secondary", url: `${WEBSITE}/pricing-sheet`, price: "₦7,500" },
+        { name: "Free tasting box (weddings)", description: "Four flavours for couples who book a consultation", revenue_role: "lead_magnet" },
       ]),
-      ["politics", "religion", "competitor call-outs"]],
+      ["politics", "religion", "competitor call-outs"],
+      "A Lagos bakery making custom celebration cakes, and teaching home bakers how to price their work.",
+      "Food & bakery",
+      JSON.stringify([{ platform: "instagram", url: "https://www.instagram.com/crumbandco.example" }, { platform: "tiktok", url: "https://www.tiktok.com/@crumbandco.example" }]),
+      JSON.stringify([
+        { name: "Sugar Street Lagos", website: "https://sugarstreet.example", why: "Custom wedding cakes for the same Lagos couples", overlap: ["Custom celebration cakes"], market: "Lagos", confidence: "high", handles: { instagram: "sugarstreet.lagos", youtube: "@sugarstreetlagos" } },
+        { name: "Bake With Tolu", website: "https://bakewithtolu.example", why: "Teaches home bakers pricing, same as your pricing sheet", overlap: ["Cake pricing sheet for home bakers"], market: "Nigeria", confidence: "high", handles: { youtube: "@bakewithtolu", tiktok: "bakewithtolu" } },
+        { name: "The Frosting Room", website: "https://frostingroom.example", why: "Celebration cakes in Lekki and Ikoyi", overlap: ["Custom celebration cakes"], market: "Lagos", confidence: "medium", handles: { instagram: "thefrostingroom" } },
+        { name: "Cake Republic Abuja", website: "https://cakerepublic.example", why: "Similar custom cakes, different city; a useful benchmark", overlap: ["Custom celebration cakes"], market: "Abuja", confidence: "medium", handles: { instagram: "cakerepublic.abj" } },
+        { name: "Layers by Nneka", website: null, why: "Home baker brand with a large pricing-tips following", overlap: ["Cake pricing sheet for home bakers"], market: "Nigeria", confidence: "low", handles: { tiktok: "layersbynneka" } },
+      ])],
   );
 
   const accounts: Record<string, string> = {};

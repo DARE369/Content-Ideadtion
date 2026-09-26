@@ -1,17 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Unplug } from "lucide-react";
+import { Plus, Sparkles, Unplug } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { PlatformBadge } from "../components/bits";
 import { BrandBrainForm, brainProblems, cleanBrain } from "../components/BrandBrainForm";
 import { CompetitorsEditor } from "../components/CompetitorsEditor";
+import { CompetitorPicker } from "../components/CompetitorPicker";
+import { NarratedProgress } from "../components/Progress";
+import { ANALYSIS_STEPS, toFormBrain } from "./Setup";
 import { Dialog } from "../components/Dialog";
 import { useToast } from "../components/Toast";
 import { Button, Card, EmptyState, ErrorNote, Field, inputClass, PageHeader, Skeleton } from "../components/ui";
 import { api } from "../lib/api";
 import { ALL_PLATFORMS, num, PLATFORM_META, relativeTime } from "../lib/format";
 import type { Account, BrandBrain, Platform } from "../lib/types";
-import { useSummary, useWorkspace, useWs } from "../lib/workspace";
+import { useAppConfig, useSummary, useWorkspace, useWs } from "../lib/workspace";
 
 const TABS = [
   { id: "brand", label: "Brand Brain" },
@@ -37,7 +40,7 @@ export function SettingsPage() {
       </div>
       <div role="tabpanel">
         {tab === "brand" && <BrandTab />}
-        {tab === "competitors" && <Card className="p-5 sm:p-6"><p className="mb-5 text-sm text-ink-2">When a competitor's post does far better than their own usual, it becomes evidence for your ideas. Checked every night, public data only.</p><CompetitorsEditor ws={useWs()} /></Card>}
+        {tab === "competitors" && <CompetitorsTab />}
         {tab === "accounts" && <AccountsTab />}
         {tab === "usage" && <UsageTab />}
         {tab === "workspace" && <WorkspaceTab />}
@@ -50,30 +53,81 @@ function BrandTab() {
   const ws = useWs();
   const qc = useQueryClient();
   const toast = useToast();
+  const cfg = useAppConfig();
   const brain = useQuery({ queryKey: ["ws", ws, "brain"], queryFn: () => api.brain(ws) });
   const [value, setValue] = useState<BrandBrain | null>(null);
-  useEffect(() => { if (brain.data && !value) setValue({ ...brain.data, brand_kit: { ...brain.data.brand_kit, colors: brain.data.brand_kit?.colors ?? [], fonts: brain.data.brand_kit?.fonts ?? [] } }); }, [brain.data, value]);
+  const [name, setName] = useState("");
+  const [logos, setLogos] = useState<string[]>([]);
+  useEffect(() => {
+    if (brain.data && !value) {
+      setValue(toFormBrain(brain.data));
+      setName(brain.data.name);
+      setLogos(brain.data.draft?.logos ?? []);
+    }
+  }, [brain.data, value]);
   const save = useMutation({
-    mutationFn: (b: BrandBrain) => api.confirmBrain(ws, { ...b, timezone: brain.data?.timezone, trends_geo: brain.data?.trends_geo }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["ws", ws] }); toast({ tone: "success", message: "Saved. Tonight's ideas will use the changes." }); },
+    mutationFn: async (b: BrandBrain) => {
+      if (name.trim() && name.trim() !== brain.data?.name) await api.renameWorkspace(ws, name.trim());
+      await api.confirmBrain(ws, { ...b, timezone: brain.data?.timezone, trends_geo: b.country ?? brain.data?.trends_geo });
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["ws", ws] }); qc.invalidateQueries({ queryKey: ["workspaces"] }); toast({ tone: "success", message: "Saved. The next ideas will use the changes." }); },
+    onError: (e) => toast({ tone: "error", message: e.message }),
+  });
+  const reanalyze = useMutation({
+    mutationFn: () => api.draftBrain(ws, { website_url: value!.website_url!, goal: value!.goal, language: value!.language }),
+    onSuccess: (d) => {
+      setValue(toFormBrain({ ...d.brain, goal: value!.goal, language: value!.language, banned_topics: value!.banned_topics.length ? value!.banned_topics : d.brain.banned_topics }));
+      if (d.name) setName(d.name);
+      setLogos(d.logos);
+      qc.invalidateQueries({ queryKey: ["ws", ws, "competitor-suggestions"] });
+      toast({ tone: "success", message: "Updated from your website. Review it, then press Save." });
+    },
     onError: (e) => toast({ tone: "error", message: e.message }),
   });
   if (brain.isLoading || !value) return brain.isError ? <ErrorNote error={brain.error} /> : <Skeleton className="h-96" />;
   const problems = brainProblems(value);
+  const canAnalyze = !!cfg.data?.ai_configured && !!value.website_url && /^https?:\/\/\S+\.\S+/.test(value.website_url);
   return (
     <Card className="p-5 sm:p-6">
-      <form onSubmit={(e) => { e.preventDefault(); if (!problems.length) save.mutate(cleanBrain(value)); }}>
-        <Field label="Website" htmlFor="bb-site">
-          <input id="bb-site" className={inputClass} value={value.website_url ?? ""} onChange={(e) => setValue({ ...value, website_url: e.target.value || null })} />
-        </Field>
-        <div className="mt-6"><BrandBrainForm value={value} onChange={setValue} /></div>
-        {problems.length > 0 && <ul className="mt-6 list-inside list-disc text-sm text-bad">{problems.map((p) => <li key={p}>{p}</li>)}</ul>}
-        <div className="sticky bottom-16 mt-6 flex justify-end gap-2 border-t border-line bg-surface pt-4 lg:bottom-0">
-          <Button type="button" variant="ghost" onClick={() => setValue(null)}>Discard changes</Button>
-          <Button type="submit" variant="primary" loading={save.isPending} disabled={problems.length > 0}>Save</Button>
+      {reanalyze.isPending ? (
+        <div className="py-2">
+          <h2 className="mb-4 text-base font-semibold">Re-analysing {value.website_url}…</h2>
+          <NarratedProgress intervalMs={11000} steps={ANALYSIS_STEPS} />
         </div>
-      </form>
+      ) : (
+        <form onSubmit={(e) => { e.preventDefault(); if (!problems.length) save.mutate(cleanBrain(value)); }}>
+          {canAnalyze && (
+            <div className="mb-6 flex flex-col gap-3 rounded-xl bg-surface-2 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-ink-2">Something off? Re-read your website and research your business again. You'll review the result before anything is saved.</p>
+              <Button type="button" icon={<Sparkles className="size-4" />} onClick={() => reanalyze.mutate()}>Re-analyse my website</Button>
+            </div>
+          )}
+          <BrandBrainForm value={value} onChange={setValue} name={name} onNameChange={setName} logos={logos} />
+          {problems.length > 0 && <ul className="mt-6 list-inside list-disc text-sm text-bad">{problems.map((p) => <li key={p}>{p}</li>)}</ul>}
+          <div className="sticky bottom-16 mt-6 flex justify-end gap-2 border-t border-line bg-surface pt-4 lg:bottom-0">
+            <Button type="button" variant="ghost" onClick={() => setValue(null)}>Discard changes</Button>
+            <Button type="submit" variant="primary" loading={save.isPending} disabled={problems.length > 0}>Save</Button>
+          </div>
+        </form>
+      )}
     </Card>
+  );
+}
+
+function CompetitorsTab() {
+  const ws = useWs();
+  return (
+    <div className="flex flex-col gap-6">
+      <Card className="p-5 sm:p-6">
+        <h2 className="text-base font-semibold">Suggested competitors</h2>
+        <p className="mb-5 mt-1 text-sm text-ink-2">Researched from what you sell and where. When one of their posts does far better than their usual, it becomes evidence for your ideas. Public data only, checked every night.</p>
+        <CompetitorPicker ws={ws} />
+      </Card>
+      <Card className="p-5 sm:p-6">
+        <h2 className="mb-4 text-base font-semibold">Tracked competitors</h2>
+        <CompetitorsEditor ws={ws} />
+      </Card>
+    </div>
   );
 }
 

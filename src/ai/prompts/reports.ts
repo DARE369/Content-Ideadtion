@@ -50,4 +50,3 @@ export const VisionTags = z.object({
   on_screen_text: z.string().nullable(),
 });
 
-export const BRAND_DRAFT_ROLE = `You draft a Brand Brain from a company's website text so the owner only has to confirm it. Be specific and conservative: only state what the site supports. Pillars are 3-5 recurring content themes the brand can credibly post about. Tone words are 3-5 adjectives. Offers are the concrete products or services with their links when present.`;

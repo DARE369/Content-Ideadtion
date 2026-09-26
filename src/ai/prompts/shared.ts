@@ -21,17 +21,26 @@ export const IDEA_SOURCES = ["own_comments", "own_winner", "trend", "competitor_
 
 export const CTA_TYPES = ["link_in_bio", "link", "comment", "dm", "save", "share", "follow", "subscribe", "question", "none"] as const;
 
+const ROLE_LABEL = { core: "CORE revenue", secondary: "secondary", lead_magnet: "free / lead magnet" } as const;
+
 export function brandBrainBlock(brain: BrandBrain & { name?: string }): string {
+  const offers = brain.offers.map((o) =>
+    `- ${o.name}${o.revenue_role ? ` [${ROLE_LABEL[o.revenue_role]}]` : ""}${o.price ? ` (${o.price})` : ""}${o.description ? `: ${o.description}` : ""}${o.url ? ` <${o.url}>` : ""}`);
+  const hasCore = brain.offers.some((o) => o.revenue_role === "core");
   return [
     "# Brand Brain",
     brain.name ? `Brand: ${brain.name}` : null,
     `Website: ${brain.website_url ?? "n/a"}`,
+    brain.description ? `What the company does: ${brain.description}` : null,
+    brain.industry ? `Industry: ${brain.industry}` : null,
+    brain.country ? `Main market (country): ${brain.country}` : null,
     `Primary goal: ${brain.goal}`,
     `Content language and locale: ${brain.language}. Write every hook, caption and script in this language and locale, using local spelling, idiom and currency.`,
     `Tone: ${brain.tone_words.join(", ") || "n/a"}`,
     `Audience: ${brain.audience}`,
     `Content pillars: ${brain.pillars.join(" | ")}`,
-    `Offers: ${brain.offers.map((o) => `${o.name}${o.price ? ` (${o.price})` : ""}${o.url ? ` <${o.url}>` : ""}`).join("; ") || "n/a"}`,
+    `Products and services:\n${offers.join("\n") || "n/a"}`,
+    hasCore ? "Most ideas should build demand for the CORE revenue products and services, directly or by answering the questions their buyers have. Don't drift into topics the company doesn't sell." : null,
     `Brand colors: ${brain.brand_kit.colors.join(", ") || "n/a"}`,
     `Banned topics (never suggest, never mention): ${brain.banned_topics.join(", ") || "none"}`,
   ].filter(Boolean).join("\n");

@@ -83,6 +83,8 @@ export interface RequestOptions {
   /** Wait for tokens when the bucket is briefly empty (up to this many ms) instead of throwing. */
   maxWaitMs?: number;
   fetchImpl?: typeof fetch;
+  /** Abort a single attempt after this long. */
+  timeoutMs?: number;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -101,6 +103,7 @@ async function request(url: string, opts: RequestOptions): Promise<Response> {
       method: opts.method ?? "GET",
       headers: { "user-agent": config().HTTP_USER_AGENT, ...opts.headers },
       body: opts.body,
+      ...(opts.timeoutMs ? { signal: AbortSignal.timeout(opts.timeoutMs) } : {}),
     });
     const retryable = res.status === 429 || res.status >= 500;
     if (!retryable) return res;

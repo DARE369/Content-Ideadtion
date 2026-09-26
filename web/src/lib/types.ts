@@ -3,7 +3,7 @@ export type Goal = "reach" | "engagement" | "leads" | "sales";
 export type Relative = "top_third" | "middle_third" | "bottom_third";
 export type Confidence = "low" | "medium" | "high";
 
-export interface AppConfig { ai_configured: boolean; auth_mode: "token" | "open"; youtube_configured: boolean }
+export interface AppConfig { ai_configured: boolean; auth_mode: "token" | "open"; youtube_configured: boolean; max_competitors: number }
 
 export interface WorkspaceListItem { id: string; name: string; created_at: string; brain_confirmed: boolean }
 
@@ -13,10 +13,17 @@ export interface Summary {
   briefs: number; briefs_queued: number; posts: number; pending_matches: number; reports: number; jobs_pending: number;
 }
 
-export interface Offer { name: string; url?: string; price?: string }
+export type RevenueRole = "core" | "secondary" | "lead_magnet";
+export interface Offer { name: string; url?: string; price?: string; description?: string; category?: string; revenue_role?: RevenueRole }
+export type SocialPlatform = "instagram" | "facebook" | "linkedin" | "tiktok" | "youtube" | "x" | "threads" | "whatsapp" | "other";
+export interface SocialLink { platform: SocialPlatform; url: string }
 
 export interface BrandBrain {
   website_url: string | null;
+  description?: string;
+  industry?: string;
+  country?: string | null;
+  social_links: SocialLink[];
   brand_kit: { colors: string[]; fonts: string[]; logo_url?: string };
   goal: Goal;
   language: string;
@@ -30,7 +37,17 @@ export interface BrandBrain {
 }
 
 export interface BrandBrainRow extends BrandBrain {
-  workspace_id: string; confirmed_at: string | null; draft: BrandBrain | null;
+  workspace_id: string; name: string; confirmed_at: string | null; draft: (BrandBrain & { name?: string; logos?: string[] }) | null;
+}
+
+export interface CompetitorSuggestion {
+  name: string; website: string | null; why: string; overlap: string[]; market: string;
+  confidence: "high" | "medium" | "low"; handles: Partial<Record<Platform, string>>; tracked?: boolean;
+}
+
+export interface BrandDraft {
+  brain: BrandBrain; name: string; logos: string[]; competitor_suggestions: CompetitorSuggestion[];
+  researched_with_web: boolean; site_reachable: boolean;
 }
 
 export interface Evidence { kind: "own_post" | "competitor_post" | "trend" | "comment" | "web"; id: string; url: string | null; summary: string }
@@ -109,6 +126,6 @@ export interface Match {
   match_confidence: number | null; brief_id: string | null; idea_title: string | null; brief_caption: string | null;
 }
 
-export interface Competitor { id: string; name: string; handles: Partial<Record<Platform, string>> }
+export interface Competitor { id: string; name: string; handles: Partial<Record<Platform | "website", string>> }
 export interface Account { id: string; platform: Platform; handle: string | null; account_kind: string; connected_at: string; posts: number; last_metrics_day: string | null; followers: number | null }
 export interface CostRow { task: string; model: string; calls: number; cost_usd: number; cache_read_tokens: number; input_tokens: number }

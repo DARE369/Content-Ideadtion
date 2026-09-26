@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { api } from "../lib/api";
+import { PLATFORM_META } from "../lib/format";
 import type { Platform } from "../lib/types";
 import { PlatformBadge } from "./bits";
 import { useToast } from "./Toast";
@@ -48,7 +49,11 @@ export function CompetitorsEditor({ ws }: { ws: string }) {
                 <p className="truncate text-sm font-semibold">{c.name}</p>
                 <div className="mt-1 flex flex-wrap gap-3">
                   {Object.entries(c.handles).map(([p, h]) => (
-                    <span key={p} className="inline-flex items-center gap-1.5 text-xs text-ink-2"><PlatformBadge platform={p as Platform} withName={false} size="sm" />{h}</span>
+                    p === "website"
+                      ? <span key={p} className="text-xs text-ink-3">{String(h).replace(/^https?:\/\/(www\.)?/, "")}</span>
+                      : p in PLATFORM_META
+                        ? <span key={p} className="inline-flex items-center gap-1.5 text-xs text-ink-2"><PlatformBadge platform={p as Platform} withName={false} size="sm" />{String(h).replace(/^https?:\/\/(www\.)?/, "")}</span>
+                        : null
                   ))}
                 </div>
               </div>
@@ -61,7 +66,7 @@ export function CompetitorsEditor({ ws }: { ws: string }) {
 
       {count < 5 ? (
         <form className="flex flex-col gap-4 rounded-xl border border-line bg-surface-2/50 p-4" onSubmit={(e) => { e.preventDefault(); add.mutate(); }}>
-          <p className="text-sm font-medium">Add a competitor <span className="font-normal text-ink-3">({count} of 5)</span></p>
+          <p className="text-sm font-medium">Add one yourself <span className="font-normal text-ink-3">({count} of 5 tracked)</span></p>
           <Field label="Name" htmlFor="cmp-name">
             <input id="cmp-name" className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Sugar Street Lagos" />
           </Field>

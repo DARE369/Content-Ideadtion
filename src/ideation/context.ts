@@ -15,14 +15,22 @@ export interface WorkspaceBrain extends BrandBrain {
 export async function loadBrain(db: Db, workspaceId: string): Promise<WorkspaceBrain | null> {
   const r = await db.query(
     `select w.id as workspace_id, w.name, b.website_url, b.brand_kit, b.goal, b.language, b.timezone, b.trends_geo,
-            b.tone_words, b.pillars, coalesce(b.audience, '') as audience, b.offers, b.banned_topics
+            b.tone_words, b.pillars, coalesce(b.audience, '') as audience, b.offers, b.banned_topics,
+            b.description, b.industry, b.country, b.social_links
      from workspaces w join brand_brains b on b.workspace_id = w.id
      where w.id = $1 and b.confirmed_at is not null`,
     [workspaceId],
   );
   const row = r.rows[0];
   if (!row) return null;
-  return { ...row, brand_kit: { colors: [], fonts: [], ...row.brand_kit }, goal: row.goal as Goal };
+  return {
+    ...row,
+    description: row.description ?? undefined,
+    industry: row.industry ?? undefined,
+    social_links: row.social_links ?? [],
+    brand_kit: { colors: [], fonts: [], ...row.brand_kit },
+    goal: row.goal as Goal,
+  };
 }
 
 export async function connectedPlatforms(db: Db, workspaceId: string): Promise<Platform[]> {

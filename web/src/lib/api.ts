@@ -1,5 +1,5 @@
 import type {
-  Account, AppConfig, BrandBrain, BrandBrainRow, BriefDetail, BriefListItem, BriefPayload, Competitor, CostRow, IdeaCard,
+  Account, AppConfig, BrandBrain, BrandBrainRow, BrandDraft, CompetitorSuggestion, BriefDetail, BriefListItem, BriefPayload, Competitor, CostRow, IdeaCard,
   Learning, Match, Overview, Platform, PostDetail, PostRow, ReportDetail, ReportListItem, Summary, WorkspaceListItem,
 } from "./types";
 
@@ -65,12 +65,17 @@ export const api = {
   summary: (ws: string) => get<Summary>(`/v1/workspaces/${ws}/summary`),
 
   brain: (ws: string) => get<BrandBrainRow>(`/v1/workspaces/${ws}/brand-brain`),
-  draftBrain: (ws: string, b: { website_url: string; goal: string; language: string }) => post<BrandBrain>(`/v1/workspaces/${ws}/brand-brain/draft`, b),
+  draftBrain: (ws: string, b: { website_url: string; goal: string; language?: string | null }) => post<BrandDraft>(`/v1/workspaces/${ws}/brand-brain/draft`, b),
   confirmBrain: (ws: string, b: BrandBrain) => put(`/v1/workspaces/${ws}/brand-brain`, b),
 
   competitors: (ws: string) => get<Competitor[]>(`/v1/workspaces/${ws}/competitors`),
   addCompetitor: (ws: string, c: { name: string; handles: Partial<Record<Platform, string>> }) => post(`/v1/workspaces/${ws}/competitors`, c),
   removeCompetitor: (ws: string, id: string) => del(`/v1/workspaces/${ws}/competitors/${id}`),
+  competitorSuggestions: (ws: string) =>
+    get<{ suggestions: CompetitorSuggestion[]; tracked: number; limit: number }>(`/v1/workspaces/${ws}/competitor-suggestions`),
+  refreshCompetitorSuggestions: (ws: string) => post<{ suggestions: CompetitorSuggestion[] }>(`/v1/workspaces/${ws}/competitor-suggestions/refresh`),
+  selectCompetitors: (ws: string, pick: { names?: string[]; auto?: boolean }) =>
+    post<{ added: string[]; skipped: string[]; limit: number }>(`/v1/workspaces/${ws}/competitors/select`, pick),
 
   accounts: (ws: string) => get<{ accounts: Account[] }>(`/v1/workspaces/${ws}/accounts`).then((r) => r.accounts),
   addAccount: (ws: string, a: { platform: Platform; external_account_id: string; handle?: string; account_kind: string; studio_connection_id: string }) =>

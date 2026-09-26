@@ -15,7 +15,8 @@
     "worker:dev": "tsx src/jobs/worker.ts",
     "vercel-build": "tsc -p tsconfig.json && npm --prefix web ci && npm --prefix web run build",
     "web:dev": "npm --prefix web run dev",
-    "web:build": "npm --prefix web run build"
+    "web:build": "npm --prefix web run build",
+    "migrations:embed": "tsx scripts/embed-migrations.ts"
   },
   "license": "UNLICENSED",
   "dependencies": {

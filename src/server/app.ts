@@ -36,6 +36,8 @@ import { GOALS, PLATFORMS } from "../types.js";
 const CRON_BUDGET_MS = Number(process.env.CRON_BUDGET_MS ?? 240_000);
 
 const Format = z.enum(["md", "json", "csv"]).default("md");
+/** Markdown and CSV get a UTF-8 byte-order mark so Excel and plain viewers don't garble "₦" or "·". */
+const withBom = (f: ExportFormat, body: string) => (f === "json" ? body : `\uFEFF${body}`);
 const CONTENT_TYPES: Record<ExportFormat, string> = { md: "text/markdown; charset=utf-8", json: "application/json", csv: "text/csv; charset=utf-8" };
 
 async function body<S extends z.ZodType>(c: Context, schema: S): Promise<z.infer<S>> {
@@ -140,7 +142,7 @@ export function createApp(db: Db): Hono {
   });
 
   app.post("/v1/workspaces/:ws/brand-brain/draft", async (c) => {
-    const b = await body(c, z.object({ website_url: z.string().url(), goal: z.enum(GOALS), language: z.string().min(2) }));
+    const b = await body(c, z.object({ website_url: z.string().url(), goal: z.enum(GOALS), language: z.string().min(2).nullable().optional() }));
     return c.json(await draftBrandBrain(db, c.req.param("ws"), b));
   });
 
@@ -152,7 +154,7 @@ export function createApp(db: Db): Hono {
   });
 
   app.get("/v1/workspaces/:ws/brand-brain", async (c) => {
-    const r = await db.query("select * from brand_brains where workspace_id = $1", [c.req.param("ws")]);
+    const r = await db.query("select b.*, w.name from brand_brains b join workspaces w on w.id = b.workspace_id where b.workspace_id = $1", [c.req.param("ws")]);
     if (!r.rows[0]) throw new HTTPException(404, { message: "no brand brain" });
     return c.json(r.rows[0]);
   });
@@ -221,7 +223,7 @@ export function createApp(db: Db): Hono {
     const fmt = c.req.query("format");
     if (fmt) {
       const f = Format.parse(fmt);
-      return c.body(exportIdeas(cards, f), 200, { "content-type": CONTENT_TYPES[f] });
+      return c.body(withBom(f, exportIdeas(cards, f)), 200, { "content-type": CONTENT_TYPES[f] });
     }
     return c.json({ ideas: cards });
   });
@@ -241,7 +243,7 @@ export function createApp(db: Db): Hono {
     const card = await ideaCard(db, c.req.param("id"));
     if (!card) throw new HTTPException(404, { message: "idea not found" });
     const f = Format.parse(c.req.query("format"));
-    return c.body(exportIdeas([card], f), 200, { "content-type": CONTENT_TYPES[f] });
+    return c.body(withBom(f, exportIdeas([card], f)), 200, { "content-type": CONTENT_TYPES[f] });
   });
 
   app.post("/v1/ideas/:id/dismiss", async (c) => {
@@ -298,7 +300,7 @@ export function createApp(db: Db): Hono {
     const r = await db.query<{ payload: Brief }>("select payload from briefs where id = $1", [c.req.param("id")]);
     if (!r.rows[0]) throw new HTTPException(404, { message: "brief not found" });
     const f = Format.parse(c.req.query("format"));
-    return c.body(exportBrief(r.rows[0].payload, f), 200, { "content-type": CONTENT_TYPES[f] });
+    return c.body(withBom(f, exportBrief(r.rows[0].payload, f)), 200, { "content-type": CONTENT_TYPES[f] });
   });
 
   // --- Stage 3 contract and analytics ----------------------------------------------------

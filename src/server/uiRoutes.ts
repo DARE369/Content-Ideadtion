@@ -8,6 +8,7 @@ import { shortlist } from "../ideation/cards.js";
 import { precomputeWorkspace } from "../ideation/precompute.js";
 import { enqueue } from "../jobs/queue.js";
 import { probBeatsBaseline } from "../learning/model.js";
+import { addSuggestedCompetitors, MAX_COMPETITORS, researchCompetitors, type CompetitorSuggestion } from "../research/brand.js";
 
 /**
  * Read models and actions the web app needs on top of the studio API.
@@ -15,7 +16,35 @@ import { probBeatsBaseline } from "../learning/model.js";
  */
 export function registerUiRoutes(app: Hono, db: Db): void {
   app.get("/v1/app-config", (c) =>
-    c.json({ ai_configured: Boolean(config().ANTHROPIC_API_KEY), auth_mode: config().AUTH_MODE, youtube_configured: Boolean(config().YOUTUBE_API_KEY) }));
+    c.json({
+      ai_configured: Boolean(config().ANTHROPIC_API_KEY), auth_mode: config().AUTH_MODE,
+      youtube_configured: Boolean(config().YOUTUBE_API_KEY), max_competitors: MAX_COMPETITORS,
+    }));
+
+  /** Researched competitor suggestions, with which ones are already tracked. */
+  app.get("/v1/workspaces/:ws/competitor-suggestions", async (c) => {
+    const ws = c.req.param("ws");
+    const [s, have] = await Promise.all([
+      db.query<{ competitor_suggestions: CompetitorSuggestion[] | null }>("select competitor_suggestions from brand_brains where workspace_id = $1", [ws]),
+      db.query<{ name: string }>("select name from competitors where workspace_id = $1", [ws]),
+    ]);
+    const tracked = new Set(have.rows.map((r) => r.name.toLowerCase()));
+    const list = (s.rows[0]?.competitor_suggestions ?? []).map((x) => ({ ...x, tracked: tracked.has(x.name.toLowerCase()) }));
+    return c.json({ suggestions: list, tracked: have.rows.length, limit: MAX_COMPETITORS });
+  });
+
+  app.post("/v1/workspaces/:ws/competitor-suggestions/refresh", async (c) => {
+    if (!config().ANTHROPIC_API_KEY) throw new HTTPException(503, { message: "Competitor research needs ANTHROPIC_API_KEY on the server." });
+    return c.json({ suggestions: await researchCompetitors(db, c.req.param("ws")) });
+  });
+
+  /** Track chosen suggestions ({names}) or let the AI pick the strongest ({auto: true}), up to the limit. */
+  app.post("/v1/workspaces/:ws/competitors/select", async (c) => {
+    const b = (await c.req.json().catch(() => ({}))) as { names?: unknown; auto?: unknown };
+    const names = Array.isArray(b.names) ? b.names.filter((n): n is string => typeof n === "string") : undefined;
+    if (!b.auto && !names?.length) throw new HTTPException(400, { message: "Pick at least one competitor, or ask the AI to choose." });
+    return c.json(await addSuggestedCompetitors(db, c.req.param("ws"), { names, auto: b.auto === true }));
+  });
 
   app.get("/v1/workspaces", async (c) => {
     const r = await db.query(

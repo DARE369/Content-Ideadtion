@@ -1,26 +1,37 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Check, PenLine, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Info, PenLine, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { BrandBrainForm, GoalPicker, LanguageSelect, brainProblems, cleanBrain } from "../components/BrandBrainForm";
+import { CompetitorPicker } from "../components/CompetitorPicker";
 import { CompetitorsEditor } from "../components/CompetitorsEditor";
 import { NarratedProgress } from "../components/Progress";
 import { useToast } from "../components/Toast";
 import { Button, Card, ErrorNote, Field, inputClass, Skeleton } from "../components/ui";
 import { api } from "../lib/api";
-import type { BrandBrain, Goal } from "../lib/types";
+import type { BrandBrain, BrandDraft, Goal } from "../lib/types";
 import { useAppConfig, useSummary, useWs } from "../lib/workspace";
 
-const STEPS = ["Your brand", "Brand Brain", "Competitors", "First ideas"];
+const STEPS = ["Your website", "Your brand", "Competitors", "First ideas"];
 
-const EMPTY: BrandBrain = {
-  website_url: null, brand_kit: { colors: [], fonts: [] }, goal: "engagement", language: "en-NG",
+export const EMPTY_BRAIN: BrandBrain = {
+  website_url: null, brand_kit: { colors: [], fonts: [] }, social_links: [], goal: "engagement", language: "en-GB",
   tone_words: [], pillars: [], audience: "", offers: [], banned_topics: [],
 };
 
-function guessLanguage(): string {
-  const l = navigator.language || "en-GB";
-  return /^[a-z]{2}-[A-Z]{2}$/.test(l) ? l : "en-GB";
+export const ANALYSIS_STEPS = [
+  "Scanning your website",
+  "Extracting your logo and colours",
+  "Finding your social profiles",
+  "Researching what you sell and what earns the money",
+  "Working out who buys from you",
+  "Finding competitors in your market",
+  "Preparing your brand",
+];
+
+/** Fill any gaps so older drafts and partial research still render in the form. */
+export function toFormBrain(b: Partial<BrandBrain> | null | undefined): BrandBrain {
+  return { ...EMPTY_BRAIN, ...b, brand_kit: { ...EMPTY_BRAIN.brand_kit, ...b?.brand_kit }, social_links: b?.social_links ?? [], offers: b?.offers ?? [] };
 }
 
 export function Setup() {
@@ -71,102 +82,124 @@ function BasicsStep({ onDone }: { onDone: () => void }) {
   const toast = useToast();
   const [url, setUrl] = useState("");
   const [goal, setGoal] = useState<Goal>("engagement");
-  const [language, setLanguage] = useState(guessLanguage);
+  const [language, setLanguage] = useState("");
   const aiReady = cfg.data?.ai_configured;
   const validUrl = /^https?:\/\/\S+\.\S+/.test(url.trim()) || /^[\w-]+(\.[\w-]+)+/.test(url.trim());
   const normalized = url.trim() ? (url.trim().startsWith("http") ? url.trim() : `https://${url.trim()}`) : null;
 
-  const draft = useMutation({
-    mutationFn: () => api.draftBrain(ws, { website_url: normalized!, goal, language }),
-    onSuccess: (b) => { qc.setQueryData(["ws", ws, "draft"], { ...b, goal, language }); onDone(); },
-    onError: (e) => toast({ tone: "error", message: `Couldn't draft it: ${e.message} You can fill it in yourself instead.` }),
+  const analyze = useMutation({
+    mutationFn: () => api.draftBrain(ws, { website_url: normalized!, goal, language: language || null }),
+    onSuccess: (d) => { qc.setQueryData(["ws", ws, "draft"], d); qc.invalidateQueries({ queryKey: ["ws", ws, "competitor-suggestions"] }); onDone(); },
+    onError: (e) => toast({ tone: "error", message: `Couldn't analyse the website: ${e.message} You can set it up manually instead.` }),
   });
 
   const manual = () => {
-    qc.setQueryData(["ws", ws, "draft"], { ...EMPTY, website_url: normalized, goal, language });
+    qc.setQueryData<BrandDraft>(["ws", ws, "draft"], {
+      brain: { ...EMPTY_BRAIN, website_url: normalized, goal, language: language || navigator.language || "en-GB" },
+      name: "", logos: [], competitor_suggestions: [], researched_with_web: false, site_reachable: false,
+    });
     onDone();
   };
 
-  if (draft.isPending) {
+  if (analyze.isPending) {
     return (
       <Card className="p-6 sm:p-8">
-        <h1 className="text-xl font-semibold">Reading your website…</h1>
-        <p className="mt-1 text-sm text-ink-2">This takes about 15 seconds. You'll check everything next.</p>
-        <div className="mt-6">
-          <NarratedProgress intervalMs={3500} steps={["Fetching your website", "Working out who you sell to", "Finding 3–5 content pillars", "Listing your offers", "Picking your tone of voice"]} />
-        </div>
+        <div className="grid size-11 place-items-center rounded-xl bg-accent-soft text-accent"><Sparkles className="size-5" aria-hidden /></div>
+        <h1 className="mt-4 text-xl font-semibold">Analysing your brand…</h1>
+        <p className="mt-1 text-sm text-ink-2">We're reading your website and researching your business on the web. Usually 1–2 minutes; keep this tab open.</p>
+        <div className="mt-6"><NarratedProgress intervalMs={11000} steps={ANALYSIS_STEPS} /></div>
       </Card>
     );
   }
 
   return (
     <Card className="p-6 sm:p-8">
-      <h1 className="text-xl font-semibold">Tell us the basics</h1>
-      <p className="mt-1 text-sm text-ink-2">We'll draft your Brand Brain from your website. You stay in control of every word.</p>
-      <form className="mt-6 flex flex-col gap-6" onSubmit={(e) => { e.preventDefault(); if (aiReady && validUrl) draft.mutate(); else manual(); }}>
-        <Field label="Website" htmlFor="site" hint="Your homepage or shop page.">
-          <input id="site" className={inputClass} inputMode="url" autoComplete="url" placeholder="yourbrand.com" value={url} onChange={(e) => setUrl(e.target.value)} />
+      <h1 className="text-xl font-semibold">Let's understand your brand</h1>
+      <p className="mt-1 text-sm text-ink-2">Enter your website and we'll build your brand profile: what you sell, who buys, your logo, colours, socials and competitors. You review everything before it's used.</p>
+      <form className="mt-6 flex flex-col gap-6" onSubmit={(e) => { e.preventDefault(); if (aiReady && validUrl) analyze.mutate(); else manual(); }}>
+        <Field label="Website" htmlFor="site">
+          <input id="site" className={inputClass} inputMode="url" autoComplete="url" placeholder="yourcompany.com" value={url} onChange={(e) => setUrl(e.target.value)} />
         </Field>
         <div className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium" id="goal-label">What should your posts do most?</span>
+          <span className="text-sm font-medium">What should your posts do most?</span>
           <GoalPicker value={goal} onChange={setGoal} />
           <p className="text-xs text-ink-3">We measure every post against this, not just views.</p>
         </div>
         <Field label="Content language" htmlFor="lang" hint="Scripts and captions are written in this language, with local spelling and currency.">
-          <LanguageSelect id="lang" value={language} onChange={setLanguage} />
+          <LanguageSelect id="lang" value={language} onChange={setLanguage} allowAuto />
         </Field>
         <div className="flex flex-col gap-2 border-t border-line pt-5 sm:flex-row-reverse sm:justify-start">
           {aiReady ? (
             <>
-              <Button type="submit" variant="primary" size="lg" disabled={!validUrl} icon={<Sparkles className="size-4" />}>Draft it from my website</Button>
-              <Button type="button" variant="ghost" size="lg" onClick={manual} icon={<PenLine className="size-4" />}>I'll fill it in myself</Button>
+              <Button type="submit" variant="primary" size="lg" disabled={!validUrl} icon={<Sparkles className="size-4" />}>Analyse my website</Button>
+              <Button type="button" variant="ghost" size="lg" onClick={manual} icon={<PenLine className="size-4" />}>Set up manually</Button>
             </>
           ) : (
             <Button type="submit" variant="primary" size="lg">Continue <ArrowRight className="size-4" aria-hidden /></Button>
           )}
         </div>
         {cfg.data && !aiReady && (
-          <p className="text-xs text-ink-3">Automatic drafting needs an Anthropic API key on the server, so you'll fill in the next step yourself. It takes about 3 minutes.</p>
+          <p className="text-xs text-ink-3">Automatic analysis needs an Anthropic API key on the server, so you'll fill in the next step yourself.</p>
         )}
       </form>
     </Card>
   );
 }
 
-function ReviewStep({ existing, loading, onBack, onDone }: { existing: (BrandBrain & { draft: BrandBrain | null; confirmed_at: string | null }) | null; loading: boolean; onBack: () => void; onDone: () => void }) {
+function ReviewStep({ existing, loading, onBack, onDone }: {
+  existing: (BrandBrain & { name: string; draft: (BrandBrain & { name?: string; logos?: string[] }) | null; confirmed_at: string | null }) | null;
+  loading: boolean; onBack: () => void; onDone: () => void;
+}) {
   const ws = useWs();
   const qc = useQueryClient();
   const toast = useToast();
-  const fresh = qc.getQueryData<BrandBrain>(["ws", ws, "draft"]);
-  const initial: BrandBrain | null = fresh ?? (existing ? (existing.confirmed_at ? existing : existing.draft ?? existing) : null);
-  const [brain, setBrain] = useState<BrandBrain | null>(initial ? { ...EMPTY, ...initial, brand_kit: { ...EMPTY.brand_kit, ...initial.brand_kit } } : null);
+  const summary = useSummary();
+  const fresh = qc.getQueryData<BrandDraft>(["ws", ws, "draft"]);
+  const saved = existing ? (existing.confirmed_at ? existing : existing.draft ?? existing) : null;
+  const [brain, setBrain] = useState<BrandBrain | null>(fresh ? toFormBrain(fresh.brain) : saved ? toFormBrain(saved) : null);
+  const [name, setName] = useState(fresh?.name || existing?.draft?.name || summary.data?.name || "");
+  const logos = fresh?.logos ?? existing?.draft?.logos ?? [];
   const [showErrors, setShowErrors] = useState(false);
 
   useEffect(() => {
-    if (!brain && initial) setBrain({ ...EMPTY, ...initial, brand_kit: { ...EMPTY.brand_kit, ...initial.brand_kit } });
+    if (!brain && saved) setBrain(toFormBrain(saved));
+    if (!name && (existing?.draft?.name || summary.data?.name)) setName(existing?.draft?.name || summary.data!.name);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [existing]);
+  }, [existing, summary.data]);
 
   const save = useMutation({
-    mutationFn: (b: BrandBrain) => api.confirmBrain(ws, { ...b, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, trends_geo: b.language.split("-")[1] ?? null }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["ws", ws] }); onDone(); },
+    mutationFn: async (b: BrandBrain) => {
+      if (name.trim() && name.trim() !== summary.data?.name) await api.renameWorkspace(ws, name.trim());
+      await api.confirmBrain(ws, { ...b, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, trends_geo: b.country ?? b.language.split("-")[1] ?? null });
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["ws", ws] }); qc.invalidateQueries({ queryKey: ["workspaces"] }); onDone(); },
     onError: (e) => toast({ tone: "error", message: e.message }),
   });
 
   if (loading && !brain) return <Card className="space-y-4 p-8"><Skeleton className="h-6 w-1/2" /><Skeleton className="h-24" /><Skeleton className="h-24" /></Card>;
   if (!brain) {
-    return <Card className="p-8"><p className="text-sm">Start with the basics first.</p><Button className="mt-4" onClick={onBack}>Back</Button></Card>;
+    return <Card className="p-8"><p className="text-sm">Start with your website first.</p><Button className="mt-4" onClick={onBack}>Back</Button></Card>;
   }
   const problems = brainProblems(brain);
+  const researched = !!fresh && (fresh.brain.offers.length > 0 || !!fresh.brain.description);
 
   return (
     <Card className="p-6 sm:p-8">
-      <h1 className="text-xl font-semibold">{fresh?.pillars.length ? "Here's what we understood" : "Your Brand Brain"}</h1>
-      <p className="mt-1 text-sm text-ink-2">
-        {fresh?.pillars.length ? "Check it and fix anything that's off. Every idea and brief is built on this." : "Every idea and brief is built on this. You can change it any time in Settings."}
-      </p>
+      <div className="flex items-start gap-3">
+        {researched && <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-good-soft text-good"><Check className="size-5" aria-hidden /></div>}
+        <div>
+          <h1 className="text-xl font-semibold">{researched ? "Your brand is ready" : "Your brand"}</h1>
+          <p className="mt-1 text-sm text-ink-2">Review every part before continuing. Every idea and brief is built on this, and you can change it any time in Settings.</p>
+        </div>
+      </div>
+      {fresh && !fresh.site_reachable && (
+        <p className="mt-4 flex gap-2 rounded-lg bg-test-soft px-3 py-2 text-sm text-test">
+          <Info className="mt-0.5 size-4 shrink-0" aria-hidden />
+          Your website couldn't be read directly, so this came from web research. Check it closely.
+        </p>
+      )}
       <form className="mt-6" onSubmit={(e) => { e.preventDefault(); setShowErrors(true); if (!problems.length) save.mutate(cleanBrain(brain)); }}>
-        <BrandBrainForm value={brain} onChange={setBrain} />
+        <BrandBrainForm value={brain} onChange={setBrain} name={name} onNameChange={setName} logos={logos} />
         {showErrors && problems.length > 0 && (
           <ul role="alert" className="mt-6 list-inside list-disc rounded-lg bg-bad-soft px-4 py-3 text-sm text-bad">
             {problems.map((p) => <li key={p}>{p}</li>)}
@@ -174,7 +207,7 @@ function ReviewStep({ existing, loading, onBack, onDone }: { existing: (BrandBra
         )}
         <div className="sticky bottom-0 -mx-6 mt-8 flex justify-between gap-2 border-t border-line bg-surface px-6 py-4 sm:-mx-8 sm:px-8">
           <Button type="button" variant="ghost" onClick={onBack} icon={<ArrowLeft className="size-4" />}>Back</Button>
-          <Button type="submit" variant="primary" loading={save.isPending} icon={<Check className="size-4" />}>Looks right</Button>
+          <Button type="submit" variant="primary" loading={save.isPending}>Continue <ArrowRight className="size-4" aria-hidden /></Button>
         </div>
       </form>
     </Card>
@@ -184,13 +217,21 @@ function ReviewStep({ existing, loading, onBack, onDone }: { existing: (BrandBra
 function CompetitorStep({ onBack, onDone }: { onBack: () => void; onDone: () => void }) {
   const ws = useWs();
   const summary = useSummary();
+  const cfg = useAppConfig();
+  const [manual, setManual] = useState(false);
   return (
     <Card className="p-6 sm:p-8">
-      <h1 className="text-xl font-semibold">Who do you keep an eye on?</h1>
+      <h1 className="text-xl font-semibold">Who do you compete with?</h1>
       <p className="mt-1 text-sm text-ink-2">
-        Up to 5 brands in your space. When one of their posts does far better than their usual, it becomes evidence for your ideas. We only use public data.
+        Based on what you sell and where. Pick up to {cfg.data?.max_competitors ?? 5}, or let the AI choose. When one of their posts does far better than their usual, it becomes evidence for your ideas. Public data only.
       </p>
-      <div className="mt-6"><CompetitorsEditor ws={ws} /></div>
+      <div className="mt-6"><CompetitorPicker ws={ws} /></div>
+      <div className="mt-6 border-t border-line pt-5">
+        <button className="text-sm font-medium text-ink-2 hover:text-ink" aria-expanded={manual} onClick={() => setManual((m) => !m)}>
+          {manual ? "Hide" : "Missing someone? Add a competitor yourself"}
+        </button>
+        {manual && <div className="mt-4"><CompetitorsEditor ws={ws} /></div>}
+      </div>
       <div className="mt-8 flex justify-between gap-2 border-t border-line pt-5">
         <Button variant="ghost" onClick={onBack} icon={<ArrowLeft className="size-4" />}>Back</Button>
         <Button variant="primary" onClick={onDone}>{summary.data?.competitors ? "Continue" : "Skip for now"} <ArrowRight className="size-4" aria-hidden /></Button>
@@ -236,7 +277,7 @@ function FirstIdeasStep() {
           <div className="grid size-10 place-items-center rounded-full bg-good-soft text-good"><Check className="size-5" aria-hidden /></div>
           <h1 className="mt-4 text-xl font-semibold">{gen.data.ideas.length} ideas are ready</h1>
           <p className="mt-1 text-sm text-ink-2">
-            Pick one and we'll write a brief your studio can shoot. New ideas arrive every night, and they get sharper as your posts come in.
+            Built around what you sell. Pick one and we'll write a brief your studio can shoot. New ideas arrive every night, and they get sharper as your posts come in.
           </p>
           <AccountsNote />
           <Button className="mt-6" variant="primary" size="lg" onClick={finish}>See this week's ideas <ArrowRight className="size-4" aria-hidden /></Button>
@@ -253,7 +294,7 @@ function FirstIdeasStep() {
           <p className="mt-1 text-sm text-ink-2">Usually under a minute. Please keep this tab open.</p>
           <div className="mt-6">
             <NarratedProgress intervalMs={9000} steps={[
-              "Reading your Brand Brain and audience",
+              "Reading your brand and what you sell",
               "Looking at what already works for you",
               "Checking competitor winners and trends",
               "Writing 15 ideas",

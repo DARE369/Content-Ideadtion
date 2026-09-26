@@ -63,12 +63,12 @@ export async function assertBudget(ctx: CallContext): Promise<void> {
   if (spent >= budget) throw new BudgetExceededError(ctx.workspaceId, spent, budget);
 }
 
-export async function logCost(ctx: CallContext, model: string, usage: UsageLike, latencyMs: number | null, batch = false): Promise<void> {
+export async function logCost(ctx: CallContext, model: string, usage: UsageLike, latencyMs: number | null, batch = false, extraUsd = 0): Promise<void> {
   await (ctx.db ?? db()).query(
     `insert into cost_log (workspace_id, task, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, batch, cost_usd, latency_ms)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
     [ctx.workspaceId, ctx.task, model, usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens ?? 0,
-      usage.cache_creation_input_tokens ?? 0, batch, costUsd(model, usage, batch), latencyMs],
+      usage.cache_creation_input_tokens ?? 0, batch, costUsd(model, usage, batch) + extraUsd, latencyMs],
   );
 }
 
@@ -135,4 +135,63 @@ export async function streamText(req: StreamRequest, onText: (delta: string) => 
   await logCost(req, model, final.usage, Date.now() - started);
   if (final.stop_reason === "refusal") throw new RefusalError(`${req.task}: model declined`);
   return final.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("");
+}
+
+export interface ResearchRequest extends CallContext {
+  system: string[];
+  content: string;
+  maxSearches?: number;
+  maxFetches?: number;
+}
+
+/**
+ * A research turn with Claude's server-side web search and web fetch. The
+ * server runs the tool loop; when it pauses (`pause_turn`) we send the turn back
+ * and it resumes. Falls back to no tools if the account has web tools disabled.
+ * Returns the final text.
+ */
+export async function research(req: ResearchRequest): Promise<{ text: string; searched: boolean }> {
+  await assertBudget(req);
+  const model = modelFor("strategy");
+  const { effort, ...extra } = tierParams(model, "strategy");
+  const legacy = /haiku|sonnet-4-5|opus-4-5/.test(model);
+  const tools = [
+    { type: legacy ? "web_search_20250305" : "web_search_20260209", name: "web_search", max_uses: req.maxSearches ?? 6 },
+    { type: legacy ? "web_fetch_20250910" : "web_fetch_20260209", name: "web_fetch", max_uses: req.maxFetches ?? 4 },
+  ] as unknown as Anthropic.ToolUnion[];
+
+  const run = async (withTools: boolean) => {
+    const messages: Anthropic.MessageParam[] = [{ role: "user", content: req.content }];
+    let last: Anthropic.Message | undefined;
+    for (let i = 0; i < 4; i++) {
+      const started = Date.now();
+      last = await anthropic().messages.create({
+        model,
+        max_tokens: 16000,
+        system: cachedSystem(req.system),
+        messages,
+        ...(withTools ? { tools } : {}),
+        ...(effort ? { output_config: { effort } } : {}),
+        ...extra,
+      });
+      const searches = last.usage.server_tool_use?.web_search_requests ?? 0;
+      await logCost(req, model, last.usage, Date.now() - started, false, searches * 0.01);
+      if (last.stop_reason !== "pause_turn") break;
+      messages.push({ role: "assistant", content: last.content });
+    }
+    if (last?.stop_reason === "refusal") throw new RefusalError(`${req.task}: model declined`);
+    const text = (last?.content ?? []).filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("\n").trim();
+    return text;
+  };
+
+  try {
+    return { text: await run(true), searched: true };
+  } catch (err) {
+    // Web tools can be disabled for an organisation; research from the website alone.
+    if (err instanceof Anthropic.BadRequestError || err instanceof Anthropic.PermissionDeniedError) {
+      console.warn(`[research] web tools unavailable (${err.message}); continuing without them`);
+      return { text: await run(false), searched: false };
+    }
+    throw err;
+  }
 }
