@@ -65,6 +65,17 @@ export function ScanPanel({ compact = false, onDone }: { compact?: boolean; onDo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [poll.data]);
 
+  // Cancel on the server too, or the unfinished preview would be reloaded straight back.
+  const cancel = useMutation({
+    mutationFn: (id: string) => api.cancelScan(ws, id),
+    onMutate: (id) => {
+      qc.setQueryData(["ws", ws, "scan-latest"], (s: ScanPreview | null | undefined) => (s && s.scan_id === id ? { ...s, status: "cancelled" } : s));
+      setScan(null);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["ws", ws, "scan-latest"] }),
+    onError: (e) => toast({ tone: "error", message: e.message }),
+  });
+
   const confirm = useMutation({
     mutationFn: ({ id, status }: { id: string; status: "active" | "rejected" }) => api.setSource(ws, id, status),
     onSuccess: (_d, v) => {
@@ -140,7 +151,7 @@ export function ScanPanel({ compact = false, onDone }: { compact?: boolean; onDo
             {scan.pages_to_read ? `Scan ${scan.pages_to_read} pages` : "Nothing new to read: finish"}
           </Button>
           <Button variant="ghost" icon={<ListChecks className="size-4" />} onClick={() => setChoosing(true)}>Choose pages</Button>
-          <Button variant="ghost" onClick={() => setScan(null)}>Cancel</Button>
+          <Button variant="ghost" onClick={() => cancel.mutate(scan.scan_id)}>Cancel</Button>
         </div>
         {start.isPending && <p className="flex items-center gap-2 text-sm text-ink-2"><Loader2 className="size-4 animate-spin" aria-hidden />Reading the first pages now; the rest continues in the background at half price.</p>}
         {choosing && <ChoosePages scan={scan} onClose={(s) => { setChoosing(false); if (s) setScan(s); }} />}

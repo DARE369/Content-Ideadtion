@@ -6,7 +6,7 @@ import type { Db } from "../db.js";
 import { CARD_TYPES, coverage } from "../knowledge/cards.js";
 import { createProduct, listProducts, ProductInput, refreshProductSummaries, removeProduct, updateProduct } from "../knowledge/products.js";
 import {
-  addSource, latestScan, listSources, pollScan, previewScan, ScanError, scanPages, scanStatus, selectPages, setSourceStatus, startScan,
+  addSource, cancelScan, latestScan, listSources, pollScan, previewScan, ScanError, scanPages, scanStatus, selectPages, setSourceStatus, startScan,
 } from "../knowledge/scan.js";
 import { newId } from "../lib/ids.js";
 import { StorageError, storageConfigured } from "../lib/storage.js";
@@ -84,6 +84,11 @@ export function registerKnowledgeRoutes(app: Hono, db: Db): void {
   app.post("/v1/workspaces/:ws/scans/:id/start", async (c) => {
     if (!config().ANTHROPIC_API_KEY) throw new HTTPException(503, { message: "Reading pages needs ANTHROPIC_API_KEY on the server." });
     return c.json(await wrap(() => startScan(db, c.req.param("ws"), c.req.param("id"))));
+  });
+
+  app.post("/v1/workspaces/:ws/scans/:id/cancel", async (c) => {
+    await cancelScan(db, c.req.param("ws"), c.req.param("id"));
+    return c.json({ ok: true });
   });
 
   // --- Cards -----------------------------------------------------------------------

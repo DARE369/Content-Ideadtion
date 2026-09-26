@@ -96,6 +96,7 @@ export const api = {
   scan: (ws: string, id: string) => get<ScanPreview>(`${W(ws)}/scans/${id}`),
   scanPages: (ws: string, id: string) => get<{ pages: ScanPage[] }>(`${W(ws)}/scans/${id}/pages`).then((r) => r.pages),
   selectScanPages: (ws: string, id: string, pageIds: string[]) => putO<ScanPreview>(`${W(ws)}/scans/${id}/pages`, { page_ids: pageIds }),
+  cancelScan: (ws: string, id: string) => post<{ ok: boolean }>(`${W(ws)}/scans/${id}/cancel`, {}),
   startScan: (ws: string, id: string) => post<ScanPreview>(`${W(ws)}/scans/${id}/start`, {}, { timeoutMs: 180_000 }),
   cards: (ws: string, q: { status?: string; type?: string; product?: string; q?: string } = {}) => {
     const qs = new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]).toString();

@@ -661,6 +661,11 @@ export async function scanStatus(db: Db, ws: string, scanId: string): Promise<Sc
   };
 }
 
+/** Drop a preview the user decided not to run (nothing was spent). */
+export async function cancelScan(db: Db, ws: string, scanId: string): Promise<void> {
+  await db.query("update scan_runs set status = 'cancelled', finished_at = now() where id = $1 and workspace_id = $2 and status = 'preview'", [scanId, ws]);
+}
+
 export async function latestScan(db: Db, ws: string): Promise<ScanPreview | null> {
   const r = await db.query<{ id: string }>("select id from scan_runs where workspace_id = $1 order by created_at desc limit 1", [ws]);
   return r.rows[0] ? scanStatus(db, ws, r.rows[0].id) : null;
