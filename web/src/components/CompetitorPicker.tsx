@@ -53,7 +53,8 @@ export function CompetitorPicker({ ws, onChanged }: { ws: string; onChanged?: ()
   if (research.isPending) {
     return (
       <div className="rounded-xl border border-line p-4">
-        <p className="mb-3 text-sm font-medium">Researching competitors…</p>
+        <p className="text-sm font-medium">Researching competitors…</p>
+        <p className="mb-3 text-xs text-ink-2">This searches the web and can take 2 to 3 minutes. You can keep this page open.</p>
         <NarratedProgress intervalMs={8000} steps={["Reading what you sell", "Searching your market", "Checking who sells the same things", "Finding their social profiles"]} />
       </div>
     );

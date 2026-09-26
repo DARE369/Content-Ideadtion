@@ -155,7 +155,7 @@ export const api = {
   removeCompetitor: (ws: string, id: string) => del(`/v1/workspaces/${ws}/competitors/${id}`),
   competitorSuggestions: (ws: string) =>
     get<{ suggestions: CompetitorSuggestion[]; tracked: number; limit: number }>(`/v1/workspaces/${ws}/competitor-suggestions`),
-  refreshCompetitorSuggestions: (ws: string) => post<{ suggestions: CompetitorSuggestion[] }>(`/v1/workspaces/${ws}/competitor-suggestions/refresh`, {}, { timeoutMs: 180_000 }),
+  refreshCompetitorSuggestions: (ws: string) => post<{ suggestions: CompetitorSuggestion[] }>(`/v1/workspaces/${ws}/competitor-suggestions/refresh`, {}, { timeoutMs: 250_000 }),
   selectCompetitors: (ws: string, pick: { names?: string[]; auto?: boolean }) =>
     post<{ added: string[]; skipped: string[]; limit: number }>(`/v1/workspaces/${ws}/competitors/select`, pick),
 

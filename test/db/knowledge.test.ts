@@ -7,6 +7,7 @@ import { EXTRACT_ROLE } from "../../src/knowledge/extract.js";
 import { previewScan, pollScan, scanStatus, startScan } from "../../src/knowledge/scan.js";
 import { coverage } from "../../src/knowledge/cards.js";
 import { loadBrain } from "../../src/ideation/context.js";
+import { crawlSite } from "../../src/research/website.js";
 import { freshDb } from "./setup.js";
 
 /**
@@ -41,7 +42,7 @@ function serve(routes: (base: string) => Record<string, string>): Promise<[Serve
         res.writeHead(304).end();
         return;
       }
-      res.writeHead(200, { "content-type": req.url?.endsWith(".xml") || req.url === "/robots.txt" ? "text/plain" : "text/html", etag }).end(body);
+      res.writeHead(200, { "content-type": req.url?.endsWith(".js") ? "application/javascript" : req.url?.endsWith(".xml") || req.url === "/robots.txt" ? "text/plain" : "text/html", etag }).end(body);
     }).listen(0, "127.0.0.1", () => resolve([server, `http://127.0.0.1:${(server.address() as AddressInfo).port}`]));
   });
 }
@@ -188,5 +189,36 @@ describe("knowledge scan", () => {
     await startScan(pool, "wsp_k", p.scan_id);
     expect(calls.length).toBe(before);
     expect((await scanStatus(pool, "wsp_k", p.scan_id)).status).toBe("done");
+  });
+});
+
+describe("a site built with JavaScript", () => {
+  it("reads the words from the site's code when every page is an empty shell", async () => {
+    const shell = `<!doctype html><html><head><title>Spa Energy</title><script type="module" src="/assets/index-a1.js"></script></head><body><div id="root"></div></body></html>`;
+    const js = `const a="Spa Energy supplies diesel and LPG to factories across Lagos with same-day delivery.",
+      b="Our lubricants programme cut engine downtime by a third for a cement plant in Ogun.",
+      c="flex items-center gap-2",d="Warning: Each child in a list should have a unique %s prop.";`;
+    const [spa, spaUrl] = await serve((base) => ({
+      "/sitemap.xml": `<urlset>${["/", "/about", "/services"].map((p) => `<url><loc>${base}${p}</loc></url>`).join("")}</urlset>`,
+      "/": shell, "/about": shell, "/services": shell,
+      "/assets/index-a1.js": js,
+    }));
+    try {
+      await pool.query("insert into workspaces (id, studio_workspace_id, name) values ('wsp_spa', 'wsp_spa', 'Spa Energy')");
+      await pool.query("insert into brand_brains (workspace_id, website_url, goal, language) values ('wsp_spa', $1, 'leads', 'en')", [`${spaUrl}/`]);
+      const p = await previewScan(pool, "wsp_spa", { budgetMs: 40_000 });
+      expect(p.pages_to_read).toBe(1);
+      expect(p.unreadable).toHaveLength(3);
+      expect(p.unreadable[0]!.reason).toMatch(/read from the site's code/);
+      const text = (await pool.query("select text from page_snapshots where workspace_id = 'wsp_spa' and url like '%#site-text-1'")).rows[0].text as string;
+      expect(text).toMatch(/same-day delivery/);
+      expect(text).toMatch(/cement plant/);
+      expect(text).not.toMatch(/items-center|Warning/);
+      // The Brand Brain's website analysis gets the same text.
+      const site = await crawlSite(`${spaUrl}/`);
+      expect(site.pages.at(-1)!.text).toMatch(/same-day delivery/);
+    } finally {
+      spa.close();
+    }
   });
 });

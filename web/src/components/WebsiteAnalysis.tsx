@@ -14,8 +14,8 @@ type State = "todo" | "active" | "done" | "warn" | "failed";
  * even then the person can retry it or fill the form in themselves.
  */
 const STAGES: { id: StageId; steps: string[]; stepMs: number; timeoutMs: number }[] = [
-  { id: "site", steps: ["Scanning your website", "Extracting your logo and colours", "Finding your social profiles"], stepMs: 5_000, timeoutMs: 60_000 },
-  { id: "research", steps: ["Researching what you sell and what earns the money", "Working out who buys from you", "Finding competitors in your market"], stepMs: 25_000, timeoutMs: 150_000 },
+  { id: "site", steps: ["Scanning your website", "Extracting your logo and colours", "Finding your social profiles"], stepMs: 5_000, timeoutMs: 75_000 },
+  { id: "research", steps: ["Researching what you sell and what earns the money", "Working out who buys from you", "Finding competitors in your market"], stepMs: 40_000, timeoutMs: 240_000 },
   { id: "finish", steps: ["Preparing your brand"], stepMs: 10_000, timeoutMs: 90_000 },
 ];
 

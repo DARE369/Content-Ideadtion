@@ -171,7 +171,7 @@ export async function fetchPage(
   });
   const contentType = res.headers.get("content-type") ?? "";
   let text = "";
-  if (res.status !== 304 && /text|html|xml|json/i.test(contentType || "text/html")) {
+  if (res.status !== 304 && /text|html|xml|json|javascript|ecmascript/i.test(contentType || "text/html")) {
     text = await res.text();
     if (opts.maxBytes && text.length > opts.maxBytes) text = text.slice(0, opts.maxBytes);
   } else {

@@ -16,7 +16,7 @@ import { crawlSite, dedupeSocials, guessLocale, normalizeColor, socialFromUrl, t
 
 export const MAX_COMPETITORS = 5;
 
-const RESEARCH_ROLE = `You are a brand strategist researching a company before planning its social content. Be factual and specific; never guess when you can check. Use the website text provided and web search to confirm.
+const RESEARCH_ROLE = `You are a brand strategist researching a company before planning its social content. Be factual and specific; never guess when you can check. Use the website text provided and web search to confirm. Keep it quick: a few targeted searches, and write your findings down as you go.
 
 Find out:
 1. What the company actually does, in one or two plain sentences, and its industry and markets (countries/regions).
@@ -175,8 +175,8 @@ export function mergeProfile(site: SiteProfile, p: Profile, input: { website_url
   return { brain, name: clean(p.name) || site.name || ownHost, logos: site.logos, competitor_suggestions: competitors };
 }
 
-/** Time budgets (ms). Each stage is its own HTTP request, so each fits a 60 s function limit except research. */
-export const BUDGET = { crawl: 40_000, research: 100_000, structure: 38_000, structureFallback: 14_000, competitors: 100_000, competitorsStructure: 30_000 };
+/** Time budgets (ms). Each stage is its own HTTP request inside the 300 s function limit. */
+export const BUDGET = { crawl: 50_000, research: 200_000, structure: 38_000, structureFallback: 14_000, competitors: 170_000, competitorsStructure: 40_000 };
 
 export interface AnalyseInput { website_url: string; goal: Goal; language?: string | null }
 
@@ -324,7 +324,7 @@ export function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
-const COMPETITOR_ROLE = `You research competitors for a company's social content strategy. Find 6-10 companies that sell the SAME core products to the SAME kind of customer in the SAME markets. Prefer direct, similar-sized competitors over global giants from other markets, and skip the company itself. For each: name, website, one sentence on why they compete, which of the company's products they overlap with, the market, your confidence, and their public social handles if you can find them. Use web search to check.`;
+const COMPETITOR_ROLE = `You research competitors for a company's social content strategy. Find 6-10 companies that sell the SAME core products to the SAME kind of customer in the SAME markets. Prefer direct, similar-sized competitors over global giants from other markets, and skip the company itself. For each: name, website, one sentence on why they compete, which of the company's products they overlap with, the market, your confidence, and their public social handles if you can find them. Use web search to check. Write each competitor down as soon as you've checked it, so nothing is lost if time runs out.`;
 
 const CompetitorList = z.object({ competitors: Profile.shape.competitors });
 
@@ -345,7 +345,7 @@ export async function researchCompetitors(db: Db, workspaceId: string): Promise<
     `Customers: ${b.audience}`,
     `Products and services:\n${(b.offers ?? []).map((o) => `- ${o.name}${o.revenue_role ? ` [${o.revenue_role}]` : ""}${o.description ? `: ${o.description}` : ""}`).join("\n")}`,
   ].filter(Boolean).join("\n");
-  const notes = await research({ db, task: "competitors:research", workspaceId, system: [COMPETITOR_ROLE], content: brief, maxFetches: 2, timeoutMs: BUDGET.competitors });
+  const notes = await research({ db, task: "competitors:research", workspaceId, system: [COMPETITOR_ROLE], content: brief, maxSearches: 5, maxFetches: 1, timeoutMs: BUDGET.competitors });
   // Keep the previous list rather than replace it with nothing.
   if (!notes.text) throw new CompetitorResearchError("Competitor research took too long this time. Try again in a minute, or add competitors yourself below.");
   const out = await structured({

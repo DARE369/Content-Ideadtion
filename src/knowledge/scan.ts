@@ -13,6 +13,7 @@ import {
 import { cachedExtractions, chunk, extractInBatch, extractNow, PAGES_PER_REQUEST, PROMPT_VERSION, storeExtraction, splitByUnit, type ExtractUnit } from "./extract.js";
 import { ExtractionOutput, markStale, saveCards, type ExtractedCard } from "./cards.js";
 import { refreshProductSummaries } from "./products.js";
+import { appChunks, appText, looksLikeAppShell, type AppText } from "./apptext.js";
 
 /**
  * A scan runs in three requests, each inside the hosting time limit:
@@ -119,7 +120,7 @@ async function ensurePrimary(db: Db, ws: string): Promise<SourceRow | null> {
 // Discovery (no AI)
 // ---------------------------------------------------------------------------
 
-interface Discovered { source: SourceRow; candidates: Candidate[]; robots: Robots; home: ReturnType<typeof extractPage> | null; homeHtml: string }
+interface Discovered { source: SourceRow; candidates: Candidate[]; robots: Robots; home: ReturnType<typeof extractPage> | null; homeHtml: string; app: AppText | null }
 
 async function getText(url: string, timeoutMs = 8_000): Promise<string | null> {
   try {
@@ -170,6 +171,14 @@ export async function discoverSite(source: SourceRow, left: () => number): Promi
     cands.push({ url: source.url, lastmod: null, type: "home", priority: 3 });
     for (const a of home.links) if (sameSite(a.href)) cands.push({ url: a.href, lastmod: null, ...classifyPage(a.href, a.text) });
   }
+  // A site built in the browser (React, Vite, Lovable...) sends an empty page: read its words from its own code instead.
+  let app: AppText | null = null;
+  if (html && home && looksLikeAppShell(html, home.text) && left() > 30_000) {
+    app = await appText(source.url, html, { deadlineMs: Math.min(20_000, left() - 25_000) });
+    // Links in the code count as homepage links, so a sister site (a product domain) is still found.
+    for (const u of app.links) if (!sameSite(u)) home.links.push({ href: u, text: "" });
+    if (app.text.length < 100) app = null;
+  }
   const allowed = cands.filter((c) => {
     try {
       const u = new URL(c.url);
@@ -178,7 +187,7 @@ export async function discoverSite(source: SourceRow, left: () => number): Promi
       return false;
     }
   });
-  return { source, candidates: allowed, robots, home, homeHtml };
+  return { source, candidates: allowed, robots, home, homeHtml, app };
 }
 
 async function logoHash(url: string | undefined): Promise<string | null> {
@@ -269,8 +278,8 @@ async function fetchCandidate(c: Candidate & { source_id: string }, prev: Snapsh
   }
 }
 
-async function saveFetched(db: Db, ws: string, source: SourceRow, fetched: Fetched[], prev: Map<string, SnapshotRow>): Promise<void> {
-  const fresh = fetched.filter((f) => f.status === "fresh");
+async function saveFetched(db: Db, ws: string, source: SourceRow, fetched: Fetched[], prev: Map<string, SnapshotRow>, learn = true): Promise<void> {
+  const fresh = learn ? fetched.filter((f) => f.status === "fresh") : [];
   // Lines repeated across most pages are menus and footers: learn them, drop them, remember them.
   const stripped = stripBoilerplate(fresh.map((f) => f.raw));
   let boiler = new Set(source.boilerplate);
@@ -299,7 +308,7 @@ async function saveFetched(db: Db, ws: string, source: SourceRow, fetched: Fetch
       );
       continue;
     }
-    const base = fresh.length >= 4 ? stripped[fresh.indexOf(f)]! : f.raw;
+    const base = fresh.length >= 4 && fresh.includes(f) ? stripped[fresh.indexOf(f)]! : f.raw;
     const cleaned = capText(base.split("\n").map((l) => l.trim()).filter((l) => l && !boiler.has(l)).join("\n"));
     const unreadable = cleaned.replace(/\s+/g, " ").length < 80;
     const hash = sha256(cleaned);
@@ -386,6 +395,19 @@ export async function previewScan(db: Db, ws: string, opts: { extraUrls?: string
     await saveFetched(db, ws, d.source, mine, prev);
     await db.query("update sources set last_scanned_at = now() where id = $1", [d.source.id]);
   }
+  // Text read from a JavaScript site's code becomes a few "site text" pages (read by the AI like any other page).
+  const appUrls: string[] = [];
+  for (const d of discovered) {
+    if (!d.app) continue;
+    const origin = new URL(d.source.url).origin;
+    const parts = appChunks(d.app.text);
+    const cands = parts.map((_, i) => ({ url: `${origin}/#site-text-${i + 1}`, lastmod: null, type: "home" as const, priority: 3, source_id: d.source.id }));
+    const appPrev = await snapshotsFor(db, ws, cands.map((c) => c.url));
+    await saveFetched(db, ws, d.source, cands.map((c, i) => ({
+      cand: c, html: null, status: "fresh" as const, etag: null, lastModified: null, title: `Site text ${i + 1} of ${parts.length} (read from the site's code)`, raw: parts[i]!,
+    })), appPrev, false);
+    appUrls.push(...cands.map((c) => c.url));
+  }
   // Anything we ran out of time to fetch is queued; "start" fetches it first.
   const fetchedUrls = new Set(fetched.map((f) => f.cand.url));
   for (const c of chosen.filter((x) => !fetchedUrls.has(x.url))) {
@@ -397,8 +419,8 @@ export async function previewScan(db: Db, ws: string, opts: { extraUrls?: string
   }
 
   const scanId = newId("scn");
-  const snaps = await snapshotsFor(db, ws, chosen.map((c) => c.url));
-  const pageIds = chosen.map((c) => snaps.get(c.url)?.id).filter((x): x is string => !!x);
+  const snaps = await snapshotsFor(db, ws, [...chosen.map((c) => c.url), ...appUrls]);
+  const pageIds = [...chosen.map((c) => c.url), ...appUrls].map((u) => snaps.get(u)?.id).filter((x): x is string => !!x);
   await db.query("insert into scan_runs (id, workspace_id, status, page_ids) values ($1,$2,'preview',$3)", [scanId, ws, pageIds]);
   await refreshEstimate(db, ws, scanId, { found, pagesByType, fetched: fetched.map((f) => f.status) });
   return scanStatus(db, ws, scanId);
@@ -428,7 +450,13 @@ async function refreshEstimate(db: Db, ws: string, scanId: string, extra: { foun
     to_read: toRead.length,
     reused: selected.length - toRead.length,
     quick: quick.length,
-    unreadable: pages.filter((p) => p.status === "unreadable" || p.status === "failed").map((p) => ({ url: p.url, reason: p.status === "failed" ? "couldn't be downloaded" : "almost no text (the page may need JavaScript)" })),
+    unreadable: pages.filter((p) => p.status === "unreadable" || p.status === "failed").map((p) => ({
+      url: p.url,
+      reason: p.status === "failed" ? "couldn't be downloaded"
+        : pages.some((x) => x.url.includes("#site-text-") && x.source_id === p.source_id && x.status === "fetched")
+          ? "built with JavaScript: its words were read from the site's code instead (see \"Site text\" pages)"
+          : "almost no text (the page may need JavaScript)",
+    })),
   };
   await db.query("update scan_runs set counts = $2, est_tokens = $3, est_cost_usd = $4, pages_total = $5 where id = $1",
     [scanId, JSON.stringify(counts), estTokens, est, selected.length]);

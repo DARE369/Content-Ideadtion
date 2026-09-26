@@ -1,5 +1,6 @@
 import { fetchText } from "../lib/http.js";
 import type { SocialLink } from "../contracts/brandBrain.js";
+import { appText, looksLikeAppShell } from "../knowledge/apptext.js";
 
 /**
  * Reads a brand's website the way a person skimming it would: the homepage plus
@@ -298,8 +299,10 @@ async function get(url: string, timeoutMs = 12_000, maxRetries = 1): Promise<str
 export async function crawlSite(url: string): Promise<SiteProfile> {
   const empty: SiteProfile = { url, reachable: false, name: null, description: null, logos: [], socials: [], cssColors: [], themeColor: null, language: null, country: null, pages: [] };
   let home: PageExtract;
+  let homeHtml = "";
   try {
-    home = extractPage(await get(url), url);
+    homeHtml = await get(url);
+    home = extractPage(homeHtml, url);
   } catch {
     return { ...empty, ...guessLocale(null, url) };
   }
@@ -318,6 +321,15 @@ export async function crawlSite(url: string): Promise<SiteProfile> {
     Promise.all(sheets.map((s) => get(s, 8_000, 0).then((t) => t.slice(0, 400_000)).catch(() => ""))),
   ]);
   const subs = subPages.filter((x): x is PageExtract => !!x);
+  // A site built in the browser sends empty pages: read its words from its own code (free, no browser).
+  let appPage: { url: string; title: string | null; text: string } | null = null;
+  if (looksLikeAppShell(homeHtml, home.text)) {
+    const app = await appText(url, homeHtml, { deadlineMs: 15_000 }).catch(() => null);
+    if (app && app.text.length >= 100) {
+      appPage = { url, title: "Site text (read from the site's code)", text: app.text.slice(0, 12_000) };
+      home.socials.push(...app.links.map(socialFromUrl).filter((x): x is SocialLink => !!x));
+    }
+  }
   const css = sheetTexts.join("\n");
   const cssColors = brandColorsFrom([...(home.themeColor ? [home.themeColor, home.themeColor, home.themeColor] : []), ...home.inlineColors, ...colorsInCss(css)]);
   const all = [home, ...subs];
@@ -332,6 +344,6 @@ export async function crawlSite(url: string): Promise<SiteProfile> {
     cssColors,
     themeColor: home.themeColor ? normalizeColor(home.themeColor) : null,
     ...guessLocale(home.lang, url),
-    pages: all.map((p) => ({ url: p.url, title: p.title, text: p.text.slice(0, 7000) })),
+    pages: [...all.map((p) => ({ url: p.url, title: p.title, text: p.text.slice(0, 7000) })), ...(appPage ? [appPage] : [])],
   };
 }

@@ -19,7 +19,7 @@ const FRESH_HOURS = 20;
 export const MARKET_KINDS = ["news", "regulation", "event", "deal", "data", "buyer_question", "competitor_content"] as const;
 export type MarketKind = (typeof MARKET_KINDS)[number];
 
-const MARKET_ROLE = `You scan a company's market for its content team. Find what the company's buyers are paying attention to RIGHT NOW (the last 60 days): industry news, regulation and policy, deals and projects, events, new data or reports, questions buyers are asking in forums and comment threads, and what competitors just published. Stay inside the company's industry and markets; skip generic business news. Every item needs a real URL you found and its date. Say which of the company's products each item makes relevant, if any.`;
+const MARKET_ROLE = `You scan a company's market for its content team. Find what the company's buyers are paying attention to RIGHT NOW (the last 60 days): industry news, regulation and policy, deals and projects, events, new data or reports, questions buyers are asking in forums and comment threads, and what competitors just published. Stay inside the company's industry and markets; skip generic business news. Every item needs a real URL you found and its date. Say which of the company's products each item makes relevant, if any. Write each item down as soon as you find it.`;
 
 const Scan = z.object({
   items: z.array(z.object({
@@ -57,7 +57,7 @@ export async function scanMarket(db: Db, workspaceId: string, opts: { force?: bo
     const notes = await research({
       db, task: "market_scan:research", workspaceId, system: [MARKET_ROLE],
       content: `${brandBrainBlock(brain)}\n\nToday is ${new Date().toISOString().slice(0, 10)}. Find 8-12 items.`,
-      maxSearches: 6, maxFetches: 2, timeoutMs: MARKET_BUDGET.research,
+      maxSearches: 5, maxFetches: 0, timeoutMs: MARKET_BUDGET.research,
     });
     if (!notes.text) return { ok: false, found: 0, reused: false, warning: "The market scan ran out of time; ideas use your Brand Brain only." };
     const out = await structured({

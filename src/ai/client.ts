@@ -152,6 +152,8 @@ export interface ResearchRequest extends CallContext {
   /** Stop after this long and keep whatever was found so far. */
   timeoutMs?: number;
   maxTokens?: number;
+  /** How hard the model thinks between searches; "low" is much faster. */
+  effort?: "low" | "medium" | "high";
 }
 
 export interface ResearchResult { text: string; searched: boolean; timedOut: boolean }
@@ -165,11 +167,13 @@ export interface ResearchResult { text: string; searched: boolean; timedOut: boo
 export async function research(req: ResearchRequest): Promise<ResearchResult> {
   await assertBudget(req);
   const model = modelFor("strategy");
-  const { effort, ...extra } = tierParams(model, "strategy");
-  const legacy = /haiku|sonnet-4-5|opus-4-5/.test(model);
+  const { effort: tierEffort, ...extra } = tierParams(model, "strategy");
+  const effort = tierEffort ? (req.effort ?? "low") : undefined;
+  // The basic tools: plain search results, no code-execution filtering step. Much faster, and
+  // research notes only need the gist of each page.
   const tools = [
-    { type: legacy ? "web_search_20250305" : "web_search_20260209", name: "web_search", max_uses: req.maxSearches ?? 6 },
-    { type: legacy ? "web_fetch_20250910" : "web_fetch_20260209", name: "web_fetch", max_uses: req.maxFetches ?? 4 },
+    { type: "web_search_20250305", name: "web_search", max_uses: req.maxSearches ?? 5 },
+    ...((req.maxFetches ?? 2) > 0 ? [{ type: "web_fetch_20250910", name: "web_fetch", max_uses: req.maxFetches ?? 2 }] : []),
   ] as unknown as Anthropic.ToolUnion[];
   const deadline = Date.now() + (req.timeoutMs ?? 10 * 60_000);
 
@@ -183,18 +187,22 @@ export async function research(req: ResearchRequest): Promise<ResearchResult> {
       if (left < (i === 0 ? 1 : 5_000)) return { text: texts.join("\n").trim(), timedOut: true };
       const started = Date.now();
       let last: Anthropic.Message;
+      // Streamed, so the notes written before the deadline are kept when time runs out.
+      let partial = "";
       try {
-        last = await anthropic().messages.create({
+        const stream = anthropic().messages.stream({
           model,
-          max_tokens: req.maxTokens ?? 8000,
+          max_tokens: req.maxTokens ?? 6000,
           system: cachedSystem(req.system),
           messages,
           ...(withTools ? { tools } : {}),
           ...(effort ? { output_config: { effort } } : {}),
           ...extra,
-        }, { signal: AbortSignal.timeout(left), timeout: left, maxRetries: 1 });
+        } as Anthropic.MessageCreateParamsStreaming, { signal: AbortSignal.timeout(left), timeout: left, maxRetries: 1 });
+        stream.on("text", (t: string) => { partial += t; });
+        last = await stream.finalMessage();
       } catch (err) {
-        if (isTimeout(err)) return { text: texts.join("\n").trim(), timedOut: true };
+        if (isTimeout(err)) return { text: [...texts, partial].join("\n").trim(), timedOut: true };
         throw err;
       }
       const searches = last.usage.server_tool_use?.web_search_requests ?? 0;

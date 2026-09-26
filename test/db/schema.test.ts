@@ -85,7 +85,8 @@ describe("automatic migrations", () => {
     const hang = (_: unknown, opts?: { signal?: AbortSignal }) => new Promise((_r, reject) => {
       opts?.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
     });
-    setAnthropic({ messages: { create: hang, parse: hang } } as unknown as Anthropic);
+    const hangStream = (p: unknown, opts?: { signal?: AbortSignal }) => ({ on: () => undefined, finalMessage: () => hang(p, opts) });
+    setAnthropic({ messages: { create: hang, parse: hang, stream: hangStream } } as unknown as Anthropic);
     const input = { website_url: "http://127.0.0.1:9/", goal: "leads" as const, language: null };
 
     const started = Date.now();
@@ -105,7 +106,7 @@ describe("automatic migrations", () => {
 
     // An AI that errors outright: still a draft, with a plain-language reason.
     const fail = async () => { throw Object.assign(new Error("overloaded"), { status: 429 }); };
-    setAnthropic({ messages: { create: fail, parse: fail } } as unknown as Anthropic);
+    setAnthropic({ messages: { create: fail, parse: fail, stream: () => ({ on: () => undefined, finalMessage: fail }) } } as unknown as Anthropic);
     expect((await analyseResearch(pool, "wsp_a", input)).warning).toMatch(/AI service is busy/);
     expect((await analyseFinish(pool, "wsp_a", input)).warnings).toHaveLength(1);
     await pool.end();
