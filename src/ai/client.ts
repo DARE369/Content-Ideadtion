@@ -89,6 +89,8 @@ export interface StructuredRequest<S extends z.ZodType> extends CallContext {
   maxTokens?: number;
   /** Hard ceiling for the whole call, retries included. */
   timeoutMs?: number;
+  /** Override the tier's thinking effort ("low" is faster and leaves more room for the answer). */
+  effort?: "low" | "medium" | "high";
 }
 
 /** SDK request options for a call that must finish within `timeoutMs`. */
@@ -99,7 +101,8 @@ function limits(timeoutMs: number | undefined): Anthropic.RequestOptions | undef
 export async function structured<S extends z.ZodType>(req: StructuredRequest<S>): Promise<z.infer<S>> {
   await assertBudget(req);
   const model = modelFor(req.tier);
-  const { effort, ...extra } = tierParams(model, req.tier);
+  const { effort: tierEffort, ...extra } = tierParams(model, req.tier);
+  const effort = tierEffort ? (req.effort ?? tierEffort) : undefined;
   const started = Date.now();
   const res = await anthropic().messages.parse({
     model,

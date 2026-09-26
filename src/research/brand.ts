@@ -176,7 +176,7 @@ export function mergeProfile(site: SiteProfile, p: Profile, input: { website_url
 }
 
 /** Time budgets (ms). Each stage is its own HTTP request inside the 300 s function limit. */
-export const BUDGET = { crawl: 50_000, research: 200_000, structure: 38_000, structureFallback: 14_000, competitors: 170_000, competitorsStructure: 40_000 };
+export const BUDGET = { crawl: 50_000, research: 200_000, structure: 80_000, structureFallback: 50_000, competitors: 170_000, competitorsStructure: 40_000 };
 
 export interface AnalyseInput { website_url: string; goal: Goal; language?: string | null }
 
@@ -252,6 +252,7 @@ export async function analyseFinish(db: Db, workspaceId: string, input: AnalyseI
   const notes = stored.notes ?? "";
   const warnings: string[] = [];
   let profile: Profile | null = null;
+  let lastErr: unknown = null;
   const attempts: [tier: "strategy" | "fast", withLogo: boolean, ms: number][] = [["strategy", true, BUDGET.structure], ["fast", false, BUDGET.structureFallback]];
   for (const [tier, withLogo, ms] of attempts) {
     try {
@@ -259,11 +260,12 @@ export async function analyseFinish(db: Db, workspaceId: string, input: AnalyseI
       break;
     } catch (err) {
       console.warn(`[brand structure] ${workspaceId} (${tier}): ${(err as Error).message}`);
+      lastErr = err;
     }
   }
   if (!profile) {
     profile = siteOnlyProfile(site);
-    warnings.push("The AI couldn't build your profile this time, so we filled in what your website says. Please complete the empty fields.");
+    warnings.push(`The AI couldn't build your profile this time (${structureErrorText(lastErr)}), so we filled in what your website says. Please complete the empty fields, or go back and try again.`);
   }
   const merged = mergeProfile(site, profile, input);
   await db.query(
@@ -284,6 +286,8 @@ export async function researchBrand(db: Db, workspaceId: string, input: AnalyseI
 }
 
 async function structure(db: Db, workspaceId: string, notes: string, site: SiteProfile, o: { tier: "strategy" | "fast"; withLogo: boolean; timeoutMs: number }): Promise<Profile> {
+  // Long research notes: keep the start (the summary) so the answer has room and time to finish.
+  notes = notes.length > 24_000 ? `${notes.slice(0, 24_000)}\n[notes shortened]` : notes;
   // Without research notes, the page text is the only source for products and audience.
   const pages = notes ? [] : site.pages.map((p) => ({ ...p, text: p.text.slice(0, 3000) }));
   return structured({
@@ -295,7 +299,8 @@ async function structure(db: Db, workspaceId: string, notes: string, site: SiteP
     ],
     schema: Profile,
     timeoutMs: o.timeoutMs,
-    maxTokens: 6000,
+    effort: "low",
+    maxTokens: o.tier === "strategy" ? 14_000 : 8_000,
   });
 }
 
@@ -305,6 +310,14 @@ export function siteOnlyProfile(site: SiteProfile): Profile {
     name: site.name ?? "", description: site.description ?? "", industry: "", country: site.country ?? "", language: site.language ?? "",
     audience: "", buyer_questions: [], objections: [], pillars: [], tone_words: [], products: [], social_links: [], brand_colors: [], banned_topics: [], competitors: [],
   };
+}
+
+function structureErrorText(err: unknown): string {
+  const msg = err instanceof Error ? err.message : "";
+  if (/max_tokens|truncated/i.test(msg)) return "the answer was too long";
+  if (/did not match/i.test(msg)) return "the answer came back incomplete";
+  if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError" || /timed? ?out|abort/i.test(msg))) return "it took too long";
+  return researchErrorText(err);
 }
 
 function researchErrorText(err: unknown): string {
