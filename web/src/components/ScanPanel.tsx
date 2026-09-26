@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Check, CheckCircle2, ExternalLink, Globe, ListChecks, Loader2, Plus, ScanSearch, X } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, ExternalLink, Globe, Info, ListChecks, Loader2, Plus, ScanSearch, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import type { ScanPage, ScanPreview } from "../lib/types";
@@ -117,10 +117,19 @@ export function ScanPanel({ compact = false, onDone }: { compact?: boolean; onDo
             </ul>
           </div>
         )}
+        {scan.app_sites.map((a) => (
+          <p key={a.domain} className="flex gap-2 rounded-xl bg-surface-2 px-3 py-2 text-sm text-ink-2">
+            <Info className="mt-0.5 size-4 shrink-0" aria-hidden />
+            <span>
+              <span className="font-medium text-ink">{a.domain}</span> is built with JavaScript, so its {a.covered} {a.covered === 1 ? "page looks" : "pages look"} empty to a normal download.
+              We read its words from the site's own code instead ({a.text_pages} "Site text" {a.text_pages === 1 ? "page" : "pages"}), at no extra cost.
+            </span>
+          </p>
+        ))}
         {scan.unreadable.length > 0 && (
           <details className="rounded-xl bg-test-soft px-3 py-2 text-sm text-test">
-            <summary className="cursor-pointer font-medium"><AlertTriangle className="mr-1 inline size-4" aria-hidden />{scan.unreadable.length} pages couldn't be read</summary>
-            <p className="mt-1">Upload a brochure or paste those pages' text in Knowledge → Files instead.</p>
+            <summary className="cursor-pointer font-medium"><AlertTriangle className="mr-1 inline size-4" aria-hidden />{scan.unreadable.length} {scan.unreadable.length === 1 ? "page" : "pages"} couldn't be read</summary>
+            <p className="mt-1">If they matter, upload a brochure or paste their text in Knowledge → Files.</p>
             <ul className="mt-1 list-inside list-disc">{scan.unreadable.slice(0, 8).map((u) => <li key={u.url} className="break-all">{u.url.replace(/^https?:\/\//, "")}: {u.reason}</li>)}</ul>
           </details>
         )}

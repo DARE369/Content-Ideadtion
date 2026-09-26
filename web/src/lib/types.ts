@@ -154,7 +154,7 @@ export interface ScanPreview {
   sources: { id: string; domain: string; role: string; added_by: string; status: string; reasons: string[]; pages: number }[];
   pending_sources: { id: string; domain: string; score: number; reasons: string[] }[];
   pages_found: number; pages_by_type: Record<string, number>; pages_selected: number; pages_to_read: number; pages_reused: number;
-  unreadable: { url: string; reason: string }[]; est_tokens: number; est_cost_usd: number; quick_pages: number;
+  unreadable: { url: string; reason: string }[]; app_sites: { domain: string; text_pages: number; covered: number }[]; est_tokens: number; est_cost_usd: number; quick_pages: number;
   pages_total: number; pages_done: number; cards_added: number; actual_cost_usd: number | null; error: string | null;
 }
 

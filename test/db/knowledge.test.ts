@@ -208,8 +208,10 @@ describe("a site built with JavaScript", () => {
       await pool.query("insert into brand_brains (workspace_id, website_url, goal, language) values ('wsp_spa', $1, 'leads', 'en')", [`${spaUrl}/`]);
       const p = await previewScan(pool, "wsp_spa", { budgetMs: 40_000 });
       expect(p.pages_to_read).toBe(1);
-      expect(p.unreadable).toHaveLength(3);
-      expect(p.unreadable[0]!.reason).toMatch(/read from the site's code/);
+      // The empty pages aren't reported as failures: their words came from the code.
+      expect(p.unreadable).toHaveLength(0);
+      expect(p.app_sites).toEqual([{ domain: "127.0.0.1", text_pages: 1, covered: 3 }]);
+      expect(p.sources[0]!.pages).toBe(3);
       const text = (await pool.query("select text from page_snapshots where workspace_id = 'wsp_spa' and url like '%#site-text-1'")).rows[0].text as string;
       expect(text).toMatch(/same-day delivery/);
       expect(text).toMatch(/cement plant/);

@@ -52,6 +52,8 @@ export interface ScanPreview {
   pages_to_read: number;
   pages_reused: number;
   unreadable: { url: string; reason: string }[];
+  /** Sites built with JavaScript whose words were read from their code instead. */
+  app_sites: { domain: string; text_pages: number; covered: number }[];
   est_tokens: number;
   est_cost_usd: number;
   quick_pages: number;
@@ -428,11 +430,15 @@ export async function previewScan(db: Db, ws: string, opts: { extraUrls?: string
 
 export class ScanError extends Error {}
 
+/** A "Site text" page: words read from a JavaScript site's code, not a real address. */
+export const isSiteText = (url: string) => url.includes("#site-text-");
+
 /** Which selected pages still need the model (text changed, or the prompt did), and the estimate. */
 async function refreshEstimate(db: Db, ws: string, scanId: string, extra: { found?: number; pagesByType?: Record<string, number>; fetched?: string[] } = {}): Promise<void> {
   const scan = (await db.query<{ page_ids: string[]; counts: Record<string, unknown> }>("select page_ids, counts from scan_runs where id = $1", [scanId])).rows[0]!;
   const pages = (await db.query<SnapshotRow & { selected: boolean }>("select * from page_snapshots where workspace_id = $1 and id = any($2)", [ws, scan.page_ids])).rows;
   const selected = pages.filter((p) => p.selected && p.status !== "failed" && p.status !== "unreadable");
+  const appSources = new Set(pages.filter((p) => isSiteText(p.url) && p.status === "fetched").map((p) => p.source_id ?? ""));
   const needAi = selected.filter((p) => p.status === "queued" || (p.content_hash && (p.extracted_hash !== p.content_hash || p.prompt_version !== PROMPT_VERSION)));
   const cached = await cachedExtractions(db, needAi.map((p) => p.content_hash).filter((h): h is string => !!h));
   const toRead = needAi.filter((p) => !p.content_hash || !cached.has(p.content_hash)).sort((a, b) => b.priority - a.priority);
@@ -450,12 +456,13 @@ async function refreshEstimate(db: Db, ws: string, scanId: string, extra: { foun
     to_read: toRead.length,
     reused: selected.length - toRead.length,
     quick: quick.length,
-    unreadable: pages.filter((p) => p.status === "unreadable" || p.status === "failed").map((p) => ({
-      url: p.url,
-      reason: p.status === "failed" ? "couldn't be downloaded"
-        : pages.some((x) => x.url.includes("#site-text-") && x.source_id === p.source_id && x.status === "fetched")
-          ? "built with JavaScript: its words were read from the site's code instead (see \"Site text\" pages)"
-          : "almost no text (the page may need JavaScript)",
+    // Empty pages on a site whose words were read from its code aren't a problem; only real gaps are listed.
+    unreadable: pages.filter((p) => p.status === "failed" || (p.status === "unreadable" && !appSources.has(p.source_id ?? "")))
+      .map((p) => ({ url: p.url, reason: p.status === "failed" ? "couldn't be downloaded" : "almost no text (the page may need JavaScript)" })),
+    app_sites: [...appSources].map((sid) => ({
+      source_id: sid,
+      text_pages: pages.filter((p) => p.source_id === sid && isSiteText(p.url) && p.status === "fetched").length,
+      covered: pages.filter((p) => p.source_id === sid && p.status === "unreadable").length,
     })),
   };
   await db.query("update scan_runs set counts = $2, est_tokens = $3, est_cost_usd = $4, pages_total = $5 where id = $1",
@@ -623,13 +630,14 @@ export async function finishScan(db: Db, ws: string, scanId: string): Promise<vo
 
 export async function scanStatus(db: Db, ws: string, scanId: string): Promise<ScanPreview> {
   const s = (await db.query<{
-    id: string; status: string; counts: { found?: number; pages_by_type?: Record<string, number>; selected?: number; to_read?: number; reused?: number; quick?: number; unreadable?: { url: string; reason: string }[] };
+    id: string; status: string; counts: { found?: number; pages_by_type?: Record<string, number>; selected?: number; to_read?: number; reused?: number; quick?: number; unreadable?: { url: string; reason: string }[]; app_sites?: { source_id: string; text_pages: number; covered: number }[] };
     est_tokens: number; est_cost_usd: string; actual_cost_usd: string | null; pages_total: number; pages_done: number; cards_added: number; error: string | null;
   }>("select * from scan_runs where id = $1 and workspace_id = $2", [scanId, ws])).rows[0];
   if (!s) throw new ScanError("Scan not found.");
   const sources = await listSources(db, ws);
   const perSource = (await db.query<{ source_id: string; n: number }>(
-    "select source_id, count(*)::int as n from page_snapshots where workspace_id = $1 and id in (select unnest(page_ids) from scan_runs where id = $2) group by 1", [ws, scanId],
+    `select source_id, count(*)::int as n from page_snapshots where workspace_id = $1 and url not like '%#site-text-%'
+       and id in (select unnest(page_ids) from scan_runs where id = $2) group by 1`, [ws, scanId],
   )).rows;
   return {
     scan_id: s.id, status: s.status,
@@ -641,6 +649,7 @@ export async function scanStatus(db: Db, ws: string, scanId: string): Promise<Sc
     pages_to_read: s.counts.to_read ?? 0,
     pages_reused: s.counts.reused ?? 0,
     unreadable: s.counts.unreadable ?? [],
+    app_sites: (s.counts.app_sites ?? []).map((a) => ({ domain: sources.find((x) => x.id === a.source_id)?.domain ?? "", text_pages: a.text_pages, covered: a.covered })).filter((a) => a.domain),
     est_tokens: s.est_tokens,
     est_cost_usd: Number(s.est_cost_usd),
     quick_pages: s.counts.quick ?? 0,
