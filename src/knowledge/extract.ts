@@ -2,7 +2,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import type { Db } from "../db.js";
 import { structured } from "../ai/client.js";
 import { submitBatch, type BatchItem } from "../ai/batch.js";
-import { sha256 } from "./discover.js";
+import { sha256, wellFormed } from "./discover.js";
 import { ExtractionOutput, saveCards, validCards, type ExtractedCard } from "./cards.js";
 
 /**
@@ -32,10 +32,10 @@ export const cacheKey = (hash: string) => sha256(`${hash}:${PROMPT_VERSION}`);
 export function unitContent(units: ExtractUnit[]): Anthropic.MessageParam["content"] {
   const blocks: Anthropic.ContentBlockParam[] = [];
   units.forEach((u, i) => {
-    blocks.push({ type: "text", text: `### Source ${i}${u.title ? `: ${u.title}` : ""}${u.url ? ` (${u.url})` : ""}` });
+    blocks.push({ type: "text", text: wellFormed(`### Source ${i}${u.title ? `: ${u.title}` : ""}${u.url ? ` (${u.url})` : ""}`) });
     if (u.image) blocks.push({ type: "image", source: { type: "base64", media_type: u.image.media_type, data: u.image.data } });
     else if (u.document) blocks.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: u.document.data } });
-    else blocks.push({ type: "text", text: u.text ?? "" });
+    else blocks.push({ type: "text", text: wellFormed(u.text ?? "") || "(empty)" });
   });
   blocks.push({ type: "text", text: `Extract the cards. "page" is the Source number (0 to ${units.length - 1}).` });
   return blocks;
@@ -69,7 +69,7 @@ export async function extractNow(db: Db, ws: string, units: ExtractUnit[], task:
     system: [EXTRACT_ROLE],
     content: unitContent(units),
     schema: ExtractionOutput,
-    maxTokens: 1_200 * units.length + 800,
+    maxTokens: 1_800 * units.length + 1_000,
     timeoutMs,
   });
   const per = splitByUnit(out.cards, units);
@@ -87,7 +87,7 @@ export async function extractInBatch(db: Db, ws: string, groupsOfUnits: ExtractU
   });
   const batchId = await submitBatch(db, {
     task: "knowledge:extract:batch", handler: "knowledge_cards", tier: "fast", system: [EXTRACT_ROLE],
-    schema: ExtractionOutput, items, workspaceId: ws, maxTokens: 1_200 * PAGES_PER_REQUEST + 800,
+    schema: ExtractionOutput, items, workspaceId: ws, maxTokens: 1_800 * PAGES_PER_REQUEST + 1_000,
   });
   return { batchId, groups };
 }

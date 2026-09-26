@@ -93,7 +93,7 @@ export async function addSource(db: Db, ws: string, rawUrl: string, role = "othe
        status = case when sources.status = 'rejected' and excluded.added_by = 'auto' then sources.status
                      when excluded.added_by = 'auto' and sources.status = 'active' then sources.status
                      else excluded.status end,
-       role = case when excluded.added_by = 'user' then excluded.role else sources.role end,
+       role = case when sources.role = 'primary' or excluded.added_by <> 'user' then sources.role else excluded.role end,
        relation_score = coalesce(excluded.relation_score, sources.relation_score),
        relation_reasons = case when cardinality(excluded.relation_reasons) > 0 then excluded.relation_reasons else sources.relation_reasons end
      returning *`,
@@ -521,11 +521,23 @@ export async function startScan(db: Db, ws: string, scanId: string, opts: { budg
   let lastError: unknown = null;
   for (const [i, r] of results.entries()) {
     const group = quickGroups[i]!;
-    if (r.status === "fulfilled") for (const [j, p] of group.entries()) added += await applyCards(db, ws, p, r.value[j]!);
-    else {
-      console.warn(`[scan ${scanId}] quick extraction failed: ${(r.reason as Error)?.message}`);
-      lastError = r.reason;
-      failedQuick.push(...group);
+    if (r.status === "fulfilled") {
+      for (const [j, p] of group.entries()) added += await applyCards(db, ws, p, r.value[j]!);
+      continue;
+    }
+    console.warn(`[scan ${scanId}] quick extraction failed: ${(r.reason as Error)?.message}`);
+    lastError = r.reason;
+    // One dense page can overflow a shared answer: try each page on its own before giving up on it.
+    for (const p of group) {
+      if (group.length === 1 || left() < 40_000) { failedQuick.push(p); continue; }
+      try {
+        const [cards] = await extractNow(db, ws, units([p]), "knowledge:extract", Math.min(40_000, left() - 25_000));
+        added += await applyCards(db, ws, p, cards!);
+      } catch (err) {
+        console.warn(`[scan ${scanId}] page ${p.url} failed alone: ${(err as Error)?.message}`);
+        lastError = err;
+        failedQuick.push(p);
+      }
     }
   }
 
@@ -553,10 +565,14 @@ export async function startScan(db: Db, ws: string, scanId: string, opts: { budg
 
 function aiErrorText(err: unknown): string {
   const status = (err as { status?: number } | null)?.status;
+  const msg = err instanceof Error ? err.message : "";
   if (status === 401) return "the Anthropic API key was rejected";
-  if (status === 429) return "the AI service is busy";
-  if (err instanceof Error && /budget/i.test(err.message)) return "today's AI budget is used up";
-  return "the AI service didn't respond";
+  if (status === 429 || status === 529) return "the AI service is busy";
+  if (/budget/i.test(msg)) return "today's AI budget is used up";
+  if (/max_tokens|truncated/i.test(msg)) return "the pages had more to say than one answer could hold";
+  if (status === 400) return `the AI service rejected the request (${msg.replace(/\s+/g, " ").slice(0, 140)})`;
+  if (/timed? ?out|abort/i.test(msg)) return "the AI service took too long";
+  return `the AI service didn't respond${msg ? ` (${msg.replace(/\s+/g, " ").slice(0, 100)})` : ""}`;
 }
 
 async function applyCards(db: Db, ws: string, page: SnapshotRow, cards: ExtractedCard[]): Promise<number> {

@@ -4,7 +4,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { setAnthropic } from "../../src/ai/client.js";
 import { EXTRACT_ROLE } from "../../src/knowledge/extract.js";
-import { cancelScan, latestScan, previewScan, pollScan, scanStatus, startScan } from "../../src/knowledge/scan.js";
+import { addSource, cancelScan, latestScan, previewScan, pollScan, scanStatus, startScan } from "../../src/knowledge/scan.js";
 import { coverage } from "../../src/knowledge/cards.js";
 import { loadBrain } from "../../src/ideation/context.js";
 import { crawlSite } from "../../src/research/website.js";
@@ -216,6 +216,9 @@ describe("a site built with JavaScript", () => {
       expect(text).toMatch(/same-day delivery/);
       expect(text).toMatch(/cement plant/);
       expect(text).not.toMatch(/items-center|Warning/);
+      // Adding the main site again by hand never demotes it.
+      await addSource(pool, "wsp_spa", spaUrl, "other", "user");
+      expect((await pool.query("select role from sources where workspace_id = 'wsp_spa'")).rows[0].role).toBe("primary");
       // Cancel drops the preview, so it isn't offered again.
       await cancelScan(pool, "wsp_spa", p.scan_id);
       expect((await latestScan(pool, "wsp_spa"))!.status).toBe("cancelled");

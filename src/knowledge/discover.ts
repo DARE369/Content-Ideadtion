@@ -274,9 +274,14 @@ export const MAX_PAGE_TOKENS = 2_500;
 /** Trim a page to the token cap, cutting at a line break. */
 export function capText(text: string, maxTokens = MAX_PAGE_TOKENS): string {
   const maxChars = maxTokens * 4;
-  if (text.length <= maxChars) return text;
+  if (text.length <= maxChars) return wellFormed(text);
   const cut = text.lastIndexOf("\n", maxChars);
-  return text.slice(0, cut > maxChars * 0.6 ? cut : maxChars);
+  return wellFormed(text.slice(0, cut > maxChars * 0.6 ? cut : maxChars));
+}
+
+/** Drop half emoji (lone surrogates) left by cutting text or decoding scripts: the AI API rejects them. */
+export function wellFormed(text: string): string {
+  return text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "");
 }
 
 export const sha256 = (s: string | Buffer): string => createHash("sha256").update(s).digest("hex");

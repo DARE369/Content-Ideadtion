@@ -1,5 +1,5 @@
 import { fetchPage } from "../lib/http.js";
-import { hostOf } from "./discover.js";
+import { hostOf, wellFormed } from "./discover.js";
 
 /**
  * Many modern sites (React/Vite, Lovable, Next.js, Nuxt) send an empty page and
@@ -155,7 +155,7 @@ export async function appText(pageUrl: string, html: string, opts: { deadlineMs?
     lines.push(p);
     total += p.length + 1;
   }
-  return { text: lines.join("\n"), links: [...links], scripts };
+  return { text: wellFormed(lines.join("\n")), links: [...links], scripts };
 }
 
 /** Split app text into page-sized parts (each under the per-page token cap). */

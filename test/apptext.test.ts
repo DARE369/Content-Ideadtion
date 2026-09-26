@@ -53,3 +53,12 @@ describe("reading JavaScript-built sites", () => {
     expect(parts.every((p) => p.length <= 2_000)).toBe(true);
   });
 });
+
+describe("text sent to the AI", () => {
+  it("drops half emoji that the API would reject, keeps whole ones", async () => {
+    const { wellFormed, capText } = await import("../src/knowledge/discover.js");
+    expect(wellFormed("Fuel 🚀 fast \uD83D and \uDE80 done")).toBe("Fuel 🚀 fast  and  done");
+    const cut = capText("a".repeat(39) + "🚀", 10); // 40 chars max: the cut lands inside the emoji
+    expect(cut).toBe("a".repeat(39));
+  });
+});
