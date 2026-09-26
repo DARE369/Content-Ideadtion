@@ -1,7 +1,8 @@
-import { Ban, Clapperboard, Eye, Hash, Image, Megaphone, MessageSquareQuote, Palette, ScrollText } from "lucide-react";
+import { AlertTriangle, Ban, Building2, Clapperboard, Eye, Hash, Image, Megaphone, MessageSquareQuote, Palette, ScrollText, Search } from "lucide-react";
 import type { ReactNode } from "react";
 import { featureValue, GOAL_META } from "../lib/format";
-import type { BriefPayload } from "../lib/types";
+import type { BriefPayload, Optimization } from "../lib/types";
+import { STAGE_TEXT } from "../lib/format";
 import { CopyButton, LabelBadge, PlatformBadge } from "./bits";
 import { Badge, Card } from "./ui";
 
@@ -39,6 +40,9 @@ export function BriefMeta({ b }: { b: BriefPayload }) {
       <Badge>{b.language}</Badge>
       <Badge>Goal: {GOAL_META[b.goal].name}</Badge>
       <LabelBadge label={b.label} />
+      {b.product && <Badge tone="good">Sells {b.product.name}</Badge>}
+      {b.buyer_stage && <Badge>{STAGE_TEXT[b.buyer_stage]?.label ?? b.buyer_stage} stage</Badge>}
+      {b.campaign && <Badge tone="accent">{b.campaign.name}{b.campaign.phase ? ` · ${b.campaign.phase}` : ""}</Badge>}
     </div>
   );
 }
@@ -47,6 +51,12 @@ export function BriefMeta({ b }: { b: BriefPayload }) {
 export function BriefView({ b, compact }: { b: BriefPayload; compact?: boolean }) {
   return (
     <Card className="p-5 sm:p-6">
+      {b.review_notes && b.review_notes.length > 0 && (
+        <div role="note" className="mb-5 flex gap-2 rounded-lg bg-test-soft px-3 py-2 text-sm text-test">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+          <div><p className="font-medium">Check before publishing</p><ul className="mt-1 list-inside list-disc">{b.review_notes.map((n) => <li key={n}>{n}</li>)}</ul></div>
+        </div>
+      )}
       <Section icon={<MessageSquareQuote className="size-4" />} title="Hooks: pick one" copy={b.hooks.join("\n")}>
         <ol className="flex flex-col gap-2">
           {b.hooks.map((h, i) => (
@@ -87,7 +97,9 @@ export function BriefView({ b, compact }: { b: BriefPayload; compact?: boolean }
         </Section>
       )}
 
-      {(b.title || b.thumbnail_brief) && (
+      {b.optimization && <OptimizationSection o={b.optimization} platform={b.platform ?? null} />}
+
+      {(b.title || b.thumbnail_brief) && !b.optimization?.titles?.length && (
         <Section icon={<Image className="size-4" />} title="Title and thumbnail" copy={b.title}>
           {b.title && <p className="text-sm font-semibold">{b.title}</p>}
           {b.thumbnail_brief && <p className="mt-1 text-sm text-ink-2">{b.thumbnail_brief}</p>}
@@ -125,11 +137,75 @@ export function BriefView({ b, compact }: { b: BriefPayload; compact?: boolean }
         )}
       </Section>
 
+      {b.facts && b.facts.length > 0 && !compact && (
+        <Section icon={<Building2 className="size-4" />} title="Facts this brief can use">
+          <ul className="flex flex-col gap-1.5 text-sm text-ink-2">
+            {b.facts.map((f) => <li key={f.id}>• {f.text}{f.url && <> <a className="text-xs underline" href={f.url} target="_blank" rel="noreferrer">source</a></>}</li>)}
+          </ul>
+        </Section>
+      )}
       {b.do_not.length > 0 && !compact && (
         <Section icon={<Ban className="size-4" />} title="Don't">
           <ul className="flex flex-col gap-1 text-sm text-ink-2">{b.do_not.map((d) => <li key={d}>• {d}</li>)}</ul>
         </Section>
       )}
     </Card>
+  );
+}
+
+function OptimizationSection({ o, platform }: { o: Optimization; platform: string | null }) {
+  const yt = platform === "youtube";
+  const kc = o.keyword_check;
+  return (
+    <Section icon={<Search className="size-4" />} title={yt ? "Search, titles and thumbnails" : "Search and discovery"} copy={[o.primary_keyword, ...o.secondary_keywords].join(", ")}>
+      <div className="flex flex-col gap-4 text-sm">
+        <p><span className="text-ink-3">Keyword: </span><span className="font-semibold">{o.primary_keyword}</span>{o.secondary_keywords.length > 0 && <span className="text-ink-2"> · also {o.secondary_keywords.join(", ")}</span>}</p>
+        {kc && (
+          <div className="rounded-lg bg-surface-2 p-3">
+            <p className="font-medium">What already ranks on YouTube{kc.region ? ` (${kc.region})` : ""}</p>
+            <p className="mt-1 text-ink-2">{kc.suggested_angle}</p>
+            {kc.top_results.length > 0 && (
+              <ul className="mt-2 flex flex-col gap-1 text-xs text-ink-2">
+                {kc.top_results.slice(0, 5).map((r) => <li key={r.url}><a className="underline" href={r.url} target="_blank" rel="noreferrer">{r.title}</a> · {r.channel}{r.views != null ? ` · ${r.views.toLocaleString()} views` : ""}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
+        {yt && o.titles && o.titles.length > 0 && (
+          <div>
+            <p className="mb-1 font-medium">3 titles to test <span className="font-normal text-ink-3">(YouTube Studio → Test &amp; Compare)</span></p>
+            <ol className="flex list-inside list-decimal flex-col gap-1">{o.titles.map((t) => <li key={t} className="flex items-center justify-between gap-2"><span>{t}</span><CopyButton text={t} label="Copy" /></li>)}</ol>
+          </div>
+        )}
+        {yt && o.thumbnails && o.thumbnails.length > 0 && (
+          <div>
+            <p className="mb-1 font-medium">Thumbnail concepts{o.thumbnail_spec ? <span className="font-normal text-ink-3"> · {o.thumbnail_spec.size}, {o.thumbnail_spec.ratio}, up to {o.thumbnail_spec.max_mb} MB</span> : ""}</p>
+            <ul className="grid gap-2 sm:grid-cols-3">
+              {o.thumbnails.map((t, i) => (
+                <li key={i} className="rounded-lg border border-line p-3">
+                  <div className="mb-2 grid aspect-video place-items-center rounded-md px-2 text-center text-sm font-bold" style={{ background: t.colors[0] ?? "#222", color: t.colors[1] && t.colors[1] !== t.colors[0] ? t.colors[1] : "#fff" }}>{t.text}</div>
+                  <p className="text-xs"><span className="font-medium">{t.subject}</span> · {t.layout}</p>
+                  <p className="mt-1 text-xs text-ink-2">{t.concept}</p>
+                </li>
+              ))}
+            </ul>
+            {o.thumbnail_spec && <p className="mt-1 text-xs text-ink-3">{o.thumbnail_spec.safe_zone}</p>}
+          </div>
+        )}
+        {yt && o.description && (
+          <div><div className="mb-1 flex items-center justify-between"><p className="font-medium">Description</p><CopyButton text={[o.description, "", ...(o.chapters ?? []).map((c) => `${c.t} ${c.title}`)].join("\n")} /></div>
+            <p className="whitespace-pre-wrap text-ink-2">{o.description}</p></div>
+        )}
+        {yt && o.chapters && o.chapters.length > 0 && (
+          <div><p className="mb-1 font-medium">Chapters</p><ul className="font-mono text-xs text-ink-2">{o.chapters.map((c) => <li key={c.t}>{c.t} {c.title}</li>)}</ul></div>
+        )}
+        {!yt && o.caption_first_line && <p><span className="text-ink-3">Caption opens with: </span>{o.caption_first_line}</p>}
+        {o.on_screen_text && o.on_screen_text.length > 0 && <p><span className="text-ink-3">On-screen text: </span>{o.on_screen_text.join(" · ")}</p>}
+        {o.spoken_keyword_line && <p><span className="text-ink-3">Say out loud: </span>"{o.spoken_keyword_line}"</p>}
+        {o.alt_text && <p><span className="text-ink-3">Alt text: </span>{o.alt_text}</p>}
+        {o.hashtags.length > 0 && <p><span className="text-ink-3">Hashtags: </span>{o.hashtags.join(" ")}</p>}
+        {yt && o.tags && o.tags.length > 0 && <p className="text-xs text-ink-3">Tags (misspellings only; YouTube says tags play a minimal role): {o.tags.join(", ")}</p>}
+      </div>
+    </Section>
   );
 }

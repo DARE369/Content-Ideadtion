@@ -13,12 +13,15 @@ import type { Brief } from "../contracts/brief.js";
 import { autopilot, handOff } from "../handoff/briefs.js";
 import { confirmBrandBrain, draftBrandBrain } from "../ideation/brandBrain.js";
 import { analyseFinish, analyseResearch, analyseSite } from "../research/brand.js";
+import { offersFromProducts } from "../knowledge/products.js";
 import { ideaCard, shortlist } from "../ideation/cards.js";
 import { connectedPlatforms } from "../ideation/context.js";
 import { exportBrief, exportIdeas, type ExportFormat } from "../ideation/export.js";
 import { refineIdea } from "../ideation/refine.js";
 import { enqueue } from "../jobs/queue.js";
 import { registerUiRoutes } from "./uiRoutes.js";
+import { registerKnowledgeRoutes } from "./knowledgeRoutes.js";
+import { registerPlanRoutes } from "./planRoutes.js";
 import { explain } from "./errors.js";
 import { drainFor, requeueStuck, tickSchedule, tokenResolver } from "../jobs/runner.js";
 import { newId } from "../lib/ids.js";
@@ -124,6 +127,8 @@ export function createApp(db: Db): Hono {
   });
 
   registerUiRoutes(app, db);
+  registerKnowledgeRoutes(app, db);
+  registerPlanRoutes(app, db);
 
   // --- Workspaces and the Brand Brain ------------------------------------------------
 
@@ -172,7 +177,8 @@ export function createApp(db: Db): Hono {
   app.get("/v1/workspaces/:ws/brand-brain", async (c) => {
     const r = await db.query("select b.*, w.name from brand_brains b join workspaces w on w.id = b.workspace_id where b.workspace_id = $1", [c.req.param("ws")]);
     if (!r.rows[0]) throw new HTTPException(404, { message: "no brand brain" });
-    return c.json(r.rows[0]);
+    const offers = r.rows[0].confirmed_at ? await offersFromProducts(db, c.req.param("ws")) : null;
+    return c.json({ ...r.rows[0], ...(offers ? { offers } : {}) });
   });
 
   // --- Connected accounts and competitors ----------------------------------------------

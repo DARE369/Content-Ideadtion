@@ -1,4 +1,4 @@
-import { ChevronDown, ExternalLink, FileText, MessageCircle, Tag, TrendingUp, Trophy, Users, X } from "lucide-react";
+import { BadgeCheck, Building2, CalendarDays, ChevronDown, ExternalLink, FileText, MessageCircle, Tag, TrendingUp, Trophy, Users, X } from "lucide-react";
 import { useId, useState } from "react";
 import { Link } from "react-router";
 import { CONFIDENCE_TEXT, FEATURE_NAMES, featureValue, RELATIVE_TEXT, STAGE_TEXT } from "../lib/format";
@@ -6,7 +6,7 @@ import type { Evidence, IdeaCard as Idea } from "../lib/types";
 import { LabelBadge, PlatformBadge } from "./bits";
 import { Button, Card } from "./ui";
 
-const EVIDENCE_ICON = { own_post: Trophy, comment: MessageCircle, competitor_post: Users, trend: TrendingUp, web: ExternalLink } as const;
+const EVIDENCE_ICON = { own_post: Trophy, comment: MessageCircle, competitor_post: Users, trend: TrendingUp, web: ExternalLink, business: Building2 } as const;
 
 export function EvidenceList({ items }: { items: Evidence[] }) {
   return (
@@ -85,13 +85,23 @@ export function IdeaCardView({ idea, onBrief, onDismiss }: { idea: Idea; onBrief
         <PlatformBadge platform={idea.platform} />
         {idea.content_type && <span className="text-xs text-ink-3">{featureValue("format", idea.content_type)}</span>}
         <LabelBadge label={idea.label} />
+        {idea.grounded != null && (
+          idea.grounded
+            ? <span className="inline-flex items-center gap-1 rounded-md bg-good-soft px-2 py-0.5 text-xs font-medium text-good" title="Built on real evidence: your facts, results, market news or buyer questions"><BadgeCheck className="size-3.5" aria-hidden />Grounded</span>
+            : <span className="rounded-md bg-surface-2 px-2 py-0.5 text-xs font-medium text-ink-3" title="Built from your Brand Brain only; no specific evidence yet">Starter</span>
+        )}
+        {idea.campaign_name && (
+          <span className="inline-flex items-center gap-1 rounded-md bg-accent-soft px-2 py-0.5 text-xs font-medium text-accent">
+            <CalendarDays className="size-3.5" aria-hidden />{idea.campaign_name}{idea.campaign_phase ? ` · ${idea.campaign_phase}` : ""}{idea.planned_for ? ` · ${new Date(`${idea.planned_for}T00:00:00`).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}` : ""}
+          </span>
+        )}
         <span className="ml-auto text-xs text-ink-3">{idea.effort === "low" ? "Quick to make" : idea.effort === "medium" ? "Some effort" : "Bigger shoot"}</span>
       </div>
 
       <h3 className="mt-3 text-lg font-semibold leading-snug">{idea.title}</h3>
       <p className="mt-1.5 text-sm text-ink-2"><span className="font-medium text-ink">Why now: </span>{idea.why_now}</p>
 
-      {(offer || stage) && (
+      {(offer || stage || idea.objective_title) && (
         <p className="mt-3 flex flex-wrap items-center gap-2 text-xs">
           {offer && (
             <span className="inline-flex items-center gap-1 rounded-md bg-good-soft px-2 py-1 font-medium text-good">
@@ -99,6 +109,7 @@ export function IdeaCardView({ idea, onBrief, onDismiss }: { idea: Idea; onBrief
             </span>
           )}
           {stage && <span className="rounded-md bg-surface-2 px-2 py-1 text-ink-2" title={STAGE_TEXT[stage]?.help}>{STAGE_TEXT[stage]?.label ?? stage} stage</span>}
+          {idea.objective_title && <span className="rounded-md bg-surface-2 px-2 py-1 text-ink-2" title="Growth-plan objective">Goal: {idea.objective_title}</span>}
         </p>
       )}
 

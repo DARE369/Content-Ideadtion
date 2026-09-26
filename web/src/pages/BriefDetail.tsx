@@ -51,7 +51,7 @@ export function BriefDetailPage() {
         </div>
       </header>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_16rem]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
         <BriefView b={b} />
         <aside className="flex flex-col gap-4">
           <Card className="p-4">

@@ -92,6 +92,25 @@ export async function seedDemoWorkspace(db: Db, now = new Date()): Promise<strin
       ["Worried the cake won't survive an outdoor party in the heat", "Prices seem high next to home bakers"]],
   );
 
+  // Products (week 2): the Brand Brain's offers, plus one found on a scan and not yet confirmed.
+  const productIds: Record<string, string> = {};
+  for (const [name, role, price, url, kind, summary] of [
+    ["Custom celebration cakes", "core", "from ₦45,000", `${WEBSITE}/order`, "product", "Wedding, birthday and corporate cakes made to order in Lagos, designed from the client's sketch and delivered set up."],
+    ["Cake pricing sheet for home bakers", "secondary", "₦7,500", `${WEBSITE}/pricing-sheet`, "product", "A spreadsheet and guide that shows home bakers the real cost of every cake, so they stop undercharging."],
+    ["Free tasting box (weddings)", "lead_magnet", null, null, "service", "Four flavours for couples who book a consultation."],
+  ] as const) {
+    const id = newId("prd");
+    productIds[name] = id;
+    await db.query(
+      `insert into products (id, workspace_id, name, kind, revenue_role, price_text, url, summary, origin, confirmed) values ($1,$2,$3,$4,$5,$6,$7,$8,'brand_brain',true)`,
+      [id, ws, name, kind, role, price, url, summary],
+    );
+  }
+  await db.query(
+    `insert into products (id, workspace_id, name, kind, origin, confirmed, summary, source_domain) values ($1,$2,'Baking masterclass','service','scan',false,$3,'crumbandco.example')`,
+    [newId("prd"), ws, "A one-day class on stacking and decorating tiered cakes, listed on the classes page."],
+  );
+
   const accounts: Record<string, string> = {};
   for (const [platform, kind] of [["instagram", "business"], ["tiktok", "creator"], ["youtube", "channel"]] as const) {
     const id = newId("acc");
@@ -346,7 +365,102 @@ export async function seedDemoWorkspace(db: Db, now = new Date()): Promise<strin
             ($1,'report:weekly','claude-sonnet-5',5200,1600,3000,false,0.0270, now() - interval '2 days')`,
     [ws],
   );
+  await seedKnowledge(db, ws, productIds, now);
   return ws;
+}
+
+/** Week 2 demo data: sites, facts with sources, a growth objective and a running campaign. */
+async function seedKnowledge(db: Db, ws: string, productIds: Record<string, string>, now: Date): Promise<void> {
+  await db.query(
+    "update ideas set grounded = exists (select 1 from jsonb_array_elements(evidence) e where e->>'kind' <> 'trend') where workspace_id = $1", [ws],
+  );
+  const primary = newId("src");
+  await db.query(`insert into sources (id, workspace_id, domain, url, role, added_by, status, last_scanned_at) values ($1,$2,'crumbandco.example',$3,'primary','user','active', now())`, [primary, ws, WEBSITE]);
+  await db.query(
+    `insert into sources (id, workspace_id, domain, url, role, added_by, status, relation_score, relation_reasons, last_scanned_at)
+     values ($1,$2,'crumbacademy.example','https://crumbacademy.example','sister_brand','auto','active',7,$3, now())`,
+    [newId("src"), ws, ["linked from crumbandco.example", 'crumbacademy.example names "Crumb & Co."', "same social profile (instagram.com/crumbandco.example)"]],
+  );
+  const cake = productIds["Custom celebration cakes"]!;
+  const sheet = productIds["Cake pricing sheet for home bakers"]!;
+  const tasting = productIds["Free tasting box (weddings)"]!;
+  const facts: [string, string, string, string[], string, string, "approved" | "suggested"][] = [
+    ["proof", "140 wedding cakes in 2025", "We made 140 wedding cakes in 2025, and none arrived damaged.", [cake], `${WEBSITE}/about`, "140 wedding cakes in 2025", "approved"],
+    ["testimonial", "Adaeze & Tunde", "\"The cake was the first thing guests talked about\" — Adaeze & Tunde, Ikoyi, March 2026.", [cake], `${WEBSITE}/reviews`, "The cake was the first thing guests talked about", "approved"],
+    ["pricing", "Tiered cakes from ₦45,000", "Custom two-tier cakes start at ₦45,000; three tiers for 200 guests usually ₦180,000–₦240,000.", [cake], `${WEBSITE}/order`, "Custom two-tier cakes start at ₦45,000", "approved"],
+    ["faq", "How far ahead should we book for December?", "Book 6–8 weeks ahead for December weddings; we take 12 wedding orders a month.", [cake], `${WEBSITE}/faq`, "Book 6–8 weeks ahead for December weddings", "approved"],
+    ["objection", "Will buttercream survive an outdoor party?", "We use a heat-stable Swiss meringue buttercream and deliver in a chilled van; tested at 34°C for 3 hours.", [cake], `${WEBSITE}/faq`, "tested at 34°C for 3 hours", "approved"],
+    ["process", "From sketch to cake in 3 steps", "Send a sketch or photo, taste four flavours at a consultation, and approve the final design two weeks before the date.", [cake, tasting], `${WEBSITE}/how-it-works`, "Send a sketch or photo, taste four flavours", "approved"],
+    ["proof", "Home bakers raised prices 20%", "Home bakers using the pricing sheet raised their average price by 20% in their first month (survey of 85 buyers).", [sheet], `${WEBSITE}/pricing-sheet`, "raised their average price by 20%", "suggested"],
+    ["faq", "Does the sheet work in naira?", "Yes. It's built in naira and updates flour, sugar and butter prices you enter.", [sheet], `${WEBSITE}/pricing-sheet`, "It's built in naira", "suggested"],
+    ["differentiator", "Delivered and set up", "Every tiered cake is delivered and set up by the baker who made it.", [cake], `${WEBSITE}/about`, "delivered and set up by the baker who made it", "suggested"],
+    ["client", "Corporate clients", "Corporate orders for banks and law firms in Victoria Island.", [cake], `${WEBSITE}/corporate`, "Corporate orders for banks and law firms", "suggested"],
+  ];
+  const cardIds: string[] = [];
+  for (const [type, title, body, prods, url, quote, status] of facts) {
+    const id = newId("kc");
+    cardIds.push(id);
+    await db.query(
+      `insert into knowledge_cards (id, workspace_id, type, title, body, product_ids, sources, status, confidence) values ($1,$2,$3,$4,$5,$6,$7,$8,'high')`,
+      [id, ws, type, title, body, prods, JSON.stringify([{ kind: "page", ref: "demo", url, quote }]), status],
+    );
+  }
+  await db.query("update products set ai_summary = summary, audience = $2 where id = $1", [cake, "Couples and party planners in Lagos"]);
+
+  const objective = newId("obj");
+  await db.query(
+    `insert into objectives (id, workspace_id, title, period_start, period_end, segment, product_ids, motion, stage_messages, success_metric, target_value, current_value, weight)
+     values ($1,$2,'Book 30 December weddings by 15 November', $3::date, $4::date, 'Couples marrying in Lagos in December', $5,
+       $6, $7, 'December wedding bookings', 30, 11, 7)`,
+    [objective, ws, new Date(now.getTime() - 20 * DAY).toISOString().slice(0, 10), new Date(now.getTime() + 50 * DAY).toISOString().slice(0, 10), [cake, tasting],
+      ["tasting box", "consultation", "deposit"], JSON.stringify({ awareness: "December books out early", consideration: "Your sketch, made real", decision: "Book your tasting before slots go" })],
+  );
+  await db.query(
+    `insert into objectives (id, workspace_id, title, segment, product_ids, motion, success_metric, target_value, current_value, weight)
+     values ($1,$2,'Sell 200 pricing sheets to home bakers', 'Home bakers in Nigeria', $3, '{follow,free tips,purchase}', 'Sheets sold', 200, 64, 3)`,
+    [newId("obj"), ws, [sheet]],
+  );
+
+  const campaign = newId("cpg");
+  // Weekdays only, like the real planner.
+  const day = (d: number) => {
+    const t = new Date(now.getTime() + d * DAY);
+    while (t.getUTCDay() === 0 || t.getUTCDay() === 6) t.setUTCDate(t.getUTCDate() + 1);
+    return t.toISOString().slice(0, 10);
+  };
+  await db.query(
+    `insert into campaigns (id, workspace_id, objective_id, name, goal, product_ids, audience, key_message, offer, cta_text, cta_url, start_date, end_date,
+       platforms, posts_per_week, phases, success_metric, target_value, current_value, knowledge_card_ids, status)
+     values ($1,$2,$3,'December wedding rush','leads',$4,'Couples marrying in December','Your sketch, made real — but December books out early',
+       'Free tasting box with every consultation','Book your tasting',$5,$6,$7,'{instagram,tiktok}',3,$8,'Tasting bookings',40,9,$9,'active')`,
+    [campaign, ws, objective, [cake, tasting], `${WEBSITE}/tasting`, day(-7), day(21),
+      JSON.stringify([{ name: "Problem", stage: "awareness", share: 0.25 }, { name: "Proof", stage: "consideration", share: 0.35 }, { name: "Objections", stage: "decision", share: 0.25 }, { name: "Last call", stage: "decision", share: 0.15 }]), cardIds.slice(0, 6)],
+  );
+  const plan: [number, Platform, string, string, string, string, string, string[]][] = [
+    [-6, "instagram", "Problem", "awareness", "December weddings book out by November", "Show the order calendar filling up week by week.", "reel", [cardIds[3]!]],
+    [-4, "tiktok", "Problem", "awareness", "What happens when you book your cake too late", "A short skit of a couple calling in the second week of December.", "vertical_video", [cardIds[3]!]],
+    [-1, "instagram", "Proof", "consideration", "140 wedding cakes, zero damaged: how we deliver", "Behind the scenes of the chilled van and set-up.", "carousel", [cardIds[0]!, cardIds[8]!]],
+    [1, "tiktok", "Proof", "consideration", "The 34°C buttercream test", "Three hours outdoors, checked every hour. Payoff: it holds.", "vertical_video", [cardIds[4]!]],
+    [3, "instagram", "Proof", "consideration", "\"The first thing guests talked about\"", "Adaeze & Tunde's cake, from their sketch to the table.", "reel", [cardIds[1]!, cardIds[5]!]],
+    [6, "instagram", "Objections", "decision", "What a 3-tier cake for 200 guests really costs", "Carousel: the four things that set the price, with the real range.", "carousel", [cardIds[2]!]],
+    [9, "tiktok", "Objections", "decision", "From sketch to cake in 3 steps", "Walk through the consultation and tasting box.", "vertical_video", [cardIds[5]!]],
+    [13, "instagram", "Last call", "decision", "Last 4 December slots", "Straight ask: book your tasting this week.", "reel", [cardIds[3]!]],
+  ];
+  for (const [d, platform, phase, stage, title, core, format, ev] of plan) {
+    const evidence = ev.map((id) => {
+      const f = facts[cardIds.indexOf(id)]!;
+      return { kind: "business", id, url: f[4], summary: `${f[1]} — ${f[2].slice(0, 120)}` };
+    });
+    await db.query(
+      `insert into ideas (id, workspace_id, mode, platform, title, why_now, core_idea, evidence, features, score, score_components, relative_label, confidence,
+         content_type, effort, slot, status, campaign_id, objective_id, product_id, campaign_phase, planned_for, grounded, expires_at)
+       values ($1,$2,'campaign',$3,$4,$5,$6,$7,$8,70,$9,'top_third','medium',$10,'low','explore','candidate',$11,$12,$13,$14,$15,true, $15::date + 14)`,
+      [newId("ide"), ws, platform, title, "Part of the December wedding rush campaign.", core, JSON.stringify(evidence),
+        JSON.stringify({ hook_type: "question", format, pillar: "Client stories", idea_source: "audience_question", cta_type: "link_in_bio", visual_style: "talking_head",
+          language: "en-NG", offer: "Custom celebration cakes", funnel_stage: stage, campaign_phase: phase }),
+        JSON.stringify({ L: null, F: 0.85, P: 0.4, M: 0.6, W: 0.6, G: 0.8 }), format, campaign, objective, cake, phase, day(d)],
+    );
+  }
 }
 
 async function seedReport(db: Db, ws: string, now: Date, posts: DemoPost[]): Promise<void> {

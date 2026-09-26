@@ -166,7 +166,7 @@ function OfferEditor({ offers, onChange }: { offers: Offer[]; onChange: (o: Offe
             ))}
           </div>
           <input aria-label="Short description" className={inputClass} placeholder="What it is, in a few words (optional)" value={o.description ?? ""} onChange={(e) => set(i, { description: e.target.value || undefined })} />
-          <div className="grid gap-2 sm:grid-cols-[1fr_1.6fr]">
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_1.6fr]">
             <input aria-label="Price" className={inputClass} placeholder="Price (optional)" value={o.price ?? ""} onChange={(e) => set(i, { price: e.target.value || undefined })} />
             <input aria-label="Link" className={inputClass} placeholder="https://… (optional)" value={o.url ?? ""} onChange={(e) => set(i, { url: e.target.value || undefined })} />
           </div>

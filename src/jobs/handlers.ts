@@ -1,10 +1,11 @@
-import { scanMarket } from "../research/market.js";
 import type { Db } from "../db.js";
 import { pollBatch } from "../ai/batch.js";
 import { backfillAccount, ingestAccountMetrics, refreshPerformance, runDueSnapshots } from "../analytics/ingest.js";
 import { ingestCompetitorComments, ingestCompetitors } from "../competitors/ingest.js";
 import { tagCompetitorPosts, visionTagsHandler } from "../competitors/vision.js";
 import { deliverBrief } from "../handoff/briefs.js";
+import { finishScan, knowledgeBatchHandler } from "../knowledge/scan.js";
+import { scanMarket } from "../research/market.js";
 import { precomputeWorkspace, rescoreWorkspace } from "../ideation/precompute.js";
 import { purgeExpired } from "../privacy/deletion.js";
 import type { AccountRef, TokenResolver } from "../providers/types.js";
@@ -49,6 +50,16 @@ export const handlers: Record<string, Handler> = {
     await ingestCompetitorComments(db, ws);
     await ingestWorkspaceSignals(db, tokens, ws);
     await tagCompetitorPosts(db, ws).catch((err) => console.warn(`[vision] ${ws}: ${err instanceof Error ? err.message : err}`));
+    // Cost control: nobody has opened this workspace for 3+ days and it still has fresh ideas, so don't spend on more.
+    const idle = await db.query(
+      `select 1 from workspaces w where w.id = $1 and w.last_seen_at < now() - interval '3 days'
+         and (select count(*) from ideas i where i.workspace_id = w.id and i.status = 'shortlisted' and (i.expires_at is null or i.expires_at > now())) >= 5`,
+      [ws],
+    );
+    if (idle.rowCount) {
+      console.log(`[nightly] ${ws}: idle for 3+ days with fresh ideas; skipping the model calls tonight`);
+      return;
+    }
     await scanMarket(db, ws);
     await precomputeWorkspace(db, ws);
   },
@@ -92,8 +103,13 @@ export const handlers: Record<string, Handler> = {
   },
 
   async batch_poll(db, job) {
-    const done = await pollBatch(db, job.payload as Parameters<typeof pollBatch>[1], { vision_tags: visionTagsHandler });
+    const payload = job.payload as Parameters<typeof pollBatch>[1];
+    const done = await pollBatch(db, payload, { vision_tags: visionTagsHandler, knowledge_cards: knowledgeBatchHandler });
     if (!done) throw new RetryLater(5 * 60_000);
+    if (payload.handler === "knowledge_cards") {
+      const scan = (await db.query<{ id: string; workspace_id: string }>("select id, workspace_id from scan_runs where batch_id = $1", [payload.batch_id])).rows[0];
+      if (scan) await finishScan(db, scan.workspace_id, scan.id);
+    }
   },
 
   async deliver_brief(db, job) {

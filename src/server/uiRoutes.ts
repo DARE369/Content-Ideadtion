@@ -10,6 +10,7 @@ import { enqueue } from "../jobs/queue.js";
 import { probBeatsBaseline } from "../learning/model.js";
 import { isTimeout } from "../ai/client.js";
 import { scanMarket } from "../research/market.js";
+import { storageConfigured } from "../lib/storage.js";
 import { addSuggestedCompetitors, CompetitorResearchError, MAX_COMPETITORS, researchCompetitors, type CompetitorSuggestion } from "../research/brand.js";
 
 /**
@@ -20,8 +21,24 @@ export function registerUiRoutes(app: Hono, db: Db): void {
   app.get("/v1/app-config", (c) =>
     c.json({
       ai_configured: Boolean(config().ANTHROPIC_API_KEY), auth_mode: config().AUTH_MODE,
-      youtube_configured: Boolean(config().YOUTUBE_API_KEY), max_competitors: MAX_COMPETITORS,
+      youtube_configured: Boolean(config().YOUTUBE_API_KEY), max_competitors: MAX_COMPETITORS, storage_configured: storageConfigured(),
     }));
+
+  /** Do grounded ideas get picked more than Brand-Brain-only starters? (the research doc's key test) */
+  app.get("/v1/workspaces/:ws/acceptance", async (c) => {
+    const r = await db.query<{ grounded: boolean; shown: number; accepted: number; dismissed: number }>(
+      `select grounded, count(*)::int as shown,
+              count(*) filter (where status in ('selected', 'briefed'))::int as accepted,
+              count(*) filter (where status = 'dismissed')::int as dismissed
+       from ideas where workspace_id = $1 and (status in ('selected', 'briefed', 'dismissed') or (status = 'candidate' and run_id is not null))
+         and created_at > now() - interval '90 days'
+       group by grounded`,
+      [c.req.param("ws")],
+    );
+    const row = (g: boolean) => r.rows.find((x) => x.grounded === g) ?? { grounded: g, shown: 0, accepted: 0, dismissed: 0 };
+    const rate = (x: { accepted: number; dismissed: number }) => (x.accepted + x.dismissed ? x.accepted / (x.accepted + x.dismissed) : null);
+    return c.json({ grounded: { ...row(true), rate: rate(row(true)) }, starter: { ...row(false), rate: rate(row(false)) } });
+  });
 
   /** Researched competitor suggestions, with which ones are already tracked. */
   app.get("/v1/workspaces/:ws/competitor-suggestions", async (c) => {
@@ -72,6 +89,8 @@ export function registerUiRoutes(app: Hono, db: Db): void {
   /** One call for the app shell: setup progress and the counts every screen needs. */
   app.get("/v1/workspaces/:ws/summary", async (c) => {
     const ws = c.req.param("ws");
+    // Nightly idea generation skips workspaces nobody has opened for days (cost control).
+    await db.query("update workspaces set last_seen_at = now() where id = $1 and (last_seen_at is null or last_seen_at < now() - interval '1 hour')", [ws]);
     const r = await db.query(
       `select w.id, w.name,
          b.workspace_id is not null as brain_exists, b.confirmed_at, b.goal, b.language, b.draft is not null as has_draft,

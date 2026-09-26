@@ -82,6 +82,7 @@ export const FEATURE_VOCAB = [
 export const HONESTY_RULES = [
   "# Rules",
   "- Only cite evidence ids that appear in the input. Never invent posts, numbers or sources.",
+  "- Numbers, prices, percentages, client names and results may only come from the business knowledge or evidence tables, and the idea must cite that id. With nothing to cite, make the point without a number.",
   "- Never promise virality or a specific view count. Talk about likelihood relative to the brand's own results.",
   "- Respect the banned topics absolutely.",
 ].join("\n");

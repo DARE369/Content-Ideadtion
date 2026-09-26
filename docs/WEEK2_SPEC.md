@@ -1,6 +1,6 @@
 # Week 2 Product Specification: Business Knowledge, Growth Plan, Campaigns and Platform Optimisation
 
-Status: **approved for build** · Date: 2026-09-26 · Builds on: the week-1 engine in this repo (ideation, briefs, analytics, learning loop, brand research, market scan).
+Status: **built** (see §14 for where the build differs from this spec) · Date: 2026-09-26 · Builds on: the week-1 engine in this repo (ideation, briefs, analytics, learning loop, brand research, market scan).
 
 ## 0. Summary
 
@@ -427,3 +427,12 @@ Carried to week 3: Moments inbox and share-from-phone, reasons on "Not for us" f
 - **Extraction quality on messy pages:** quotes are required, and cards are reviewed before first use.
 - **YouTube quota:** cached per keyword; the check is skipped (not failed) when quota is exhausted.
 - **Supabase free project pauses after 7 days of inactivity:** uploads fail gracefully with a "storage is paused" message.
+
+## 14. As built: differences from this spec
+
+- **Figures rule in briefs:** numbers a brief uses that aren't in the knowledge or the idea's evidence are **flagged** at the top of the brief ("Check before publishing") rather than silently removed; deleting a number mid-sentence can change its meaning. Ideas themselves are held to the rule in the prompt and the critic.
+- **Nightly ideation and batch:** Vercel Hobby runs the cron once a day, so a two-stage batch (ideas, then critic) would deliver the next day's ideas a day late. Instead, nightly generation is **skipped for workspaces nobody has opened in 3 days** while they still have 5+ fresh ideas (no quality loss, often a larger saving). Batch is used for the background part of site scans, and the scan page collects results while it's open (the daily cron is the fallback).
+- **Scan progress** is driven by the page: while it's open it checks the batch every 15 s.
+- **Campaign scheduling:** fixed weekday patterns (3 a week = Mon/Wed/Fri; 2 = Tue/Thu), capped at 24 posts per plan.
+- **Setup** gained a step, "Your products" (the scan), between the Brand Brain review and competitors.
+- **Scan cost** in tests: a 17-page, 2-site scan, previewed, read and re-scanned: the re-scan made zero model calls.

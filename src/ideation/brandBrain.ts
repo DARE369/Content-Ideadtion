@@ -1,6 +1,7 @@
 import type { Db } from "../db.js";
 import { BrandBrain } from "../contracts/brandBrain.js";
 import { researchBrand, type BrandDraft } from "../research/brand.js";
+import { syncProductsFromOffers } from "../knowledge/products.js";
 import type { Goal } from "../types.js";
 
 export { htmlToText } from "../research/website.js";
@@ -36,4 +37,12 @@ export async function confirmBrandBrain(
       brain.trends_geo ?? b.country ?? (b.language.split("-")[1] ?? null), b.tone_words, b.pillars, b.audience, JSON.stringify(b.offers),
       b.banned_topics, b.description ?? null, b.industry ?? null, b.country ?? null, JSON.stringify(b.social_links), b.buyer_questions, b.objections],
   );
+  await syncProductsFromOffers(db, workspaceId, b.offers);
+  // The primary website is the first source for knowledge scans.
+  if (b.website_url) {
+    await db.query(
+      `update sources set url = $2, domain = $3 where workspace_id = $1 and role = 'primary' and domain <> $3`,
+      [workspaceId, new URL(b.website_url).origin, new URL(b.website_url).hostname.replace(/^www\./, "").toLowerCase()],
+    ).catch(() => undefined);
+  }
 }

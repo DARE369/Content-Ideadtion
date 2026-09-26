@@ -18,6 +18,8 @@ Tie every idea to money. Name the product or service it builds demand for (its e
 - decision: the buyer is close; the post removes a hesitation (price, risk, proof, how to start) and asks for the next step.
 Across the set, most ideas serve the core revenue products, and every stage is covered. The CTA must fit the stage: awareness asks for a follow, save or share; consideration for a comment, a download or a visit; decision for a DM, a call or a booking. Buyer questions and hesitations in the Brand Brain are strong decision-stage material.
 
+Ground ideas in the business knowledge: real proof, client stories, buyer questions and hesitations, cited by id. An idea built on a verified fact beats a generic one.
+
 Ground "why now" in something real: prefer the market scan items (cite their ids) or the other evidence tables. Never invent news, numbers or dates.
 
 Mix: most ideas should reuse patterns marked "proven" in the learned patterns table; a few should test something new (a hook type or format with little data) so the brand keeps discovering what works. Follow any active guidance rules.`;
@@ -31,6 +33,7 @@ export const IdeaCandidate = z.object({
   effort: z.enum(["low", "medium", "high"]),
   sells: z.string().describe("exact name of the product or service this idea builds demand for, or 'brand'"),
   funnel_stage: z.enum(FUNNEL_STAGES),
+  objective: z.string().describe("exact title of the growth-plan objective this idea serves, or empty"),
   features: z.object({
     hook_type: z.enum(HOOK_TYPES),
     format: z.string(),

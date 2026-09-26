@@ -15,8 +15,19 @@ keyless public feeds and the studio's Supabase Postgres. There is no scraping an
 
 Every published post carries the `idea_id` and `brief_id` it came from. That link is what lets the loop learn.
 
-**Week 2 (in progress):** business knowledge from every site the brand owns, products, a growth plan, campaigns and
-platform optimisation in briefs. Full specification: [docs/WEEK2_SPEC.md](docs/WEEK2_SPEC.md).
+**Week 2:** business knowledge from every site the brand owns (stored once, re-read only when it changes), products,
+uploads, a growth plan, campaigns and platform optimisation in briefs. Specification: [docs/WEEK2_SPEC.md](docs/WEEK2_SPEC.md).
+
+| Week 2 screen | What you do there |
+| --- | --- |
+| Knowledge → Websites | Scan every site you own: sitemap, menus and clearly-related domains (others are asked first). You see the page count and estimated cost before anything is read; unchanged pages are never read twice |
+| Knowledge → Facts | Review what was found: one fact per card, each with the exact quote and link it came from. Approve, edit, merge or remove |
+| Knowledge → Products & services | What you sell, its role (main revenue, secondary, lead magnet), price, link, audience, and its facts |
+| Knowledge → Files | Upload brochures, price lists, decks and screenshots (PDF, images, text). PDFs are read in the browser; images are shrunk first |
+| Knowledge → Gaps | What's missing per product, with one question per gap; and whether grounded ideas get picked more than starters |
+| Plan → Growth plan | 2–4 business development objectives for the quarter (draft them with 5 questions); ideas are split by their weights |
+| Plan → Campaigns | A dated push around products: describe it in one sentence, check the brief, then plan dated posts (problem → proof → objections → last call) |
+| Brief → Search, titles and thumbnails | Keyword, a free YouTube "what already ranks" check, 3 titles and 3 thumbnail concepts for Test & Compare, description, chapters, hashtags within limits |
 
 ## The web app
 
@@ -110,7 +121,7 @@ All calls go through `src/ai/client.ts`:
 nvm use                      # Node 22
 npm install
 cp .env.example .env         # fill in DATABASE_URL, ANTHROPIC_API_KEY, YOUTUBE_API_KEY, API_TOKEN, STUDIO_* ...
-npm run migrate              # creates the `ideation` schema in the studio's Supabase Postgres (pgvector required)
+npm run migrate              # optional: the app also applies migrations on start (pgvector and pg_trgm required)
 npm run dev                  # API on :8787
 npm run worker:dev           # job worker (nightly precompute, snapshots, reports)
 ```

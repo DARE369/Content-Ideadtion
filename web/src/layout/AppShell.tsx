@@ -1,21 +1,31 @@
 import clsx from "clsx";
-import { BarChart3, ClipboardList, FileText, Settings, Sparkles, Wand2 } from "lucide-react";
-import { NavLink, Outlet, useNavigate } from "react-router";
+import { BarChart3, BookOpen, ClipboardList, FileText, MoreHorizontal, Settings, Sparkles, Target, Wand2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { Button } from "../components/ui";
 import { useSummary } from "../lib/workspace";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
 const NAV = [
   { to: "/week", label: "This week", icon: Sparkles },
-  { to: "/refine", label: "Refine", icon: Wand2 },
+  { to: "/plan", label: "Plan", icon: Target },
   { to: "/briefs", label: "Briefs", icon: FileText },
+  { to: "/knowledge", label: "Knowledge", icon: BookOpen },
+  { to: "/refine", label: "Refine", icon: Wand2 },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
   { to: "/reports", label: "Reports", icon: ClipboardList },
 ] as const;
+/** Phones get the first four plus "More" (the rest). */
+const MOBILE = NAV.slice(0, 4);
+const MORE = NAV.slice(4);
 
 export function AppShell() {
   const summary = useSummary();
   const nav = useNavigate();
+  const { pathname } = useLocation();
+  const [more, setMore] = useState(false);
+  useEffect(() => setMore(false), [pathname]);
+  const inMore = MORE.some((m) => pathname.startsWith(m.to));
   const isDemo = summary.data?.name.includes("(demo)");
   const badge = (to: string) =>
     to === "/briefs" && summary.data?.briefs_queued ? summary.data.briefs_queued
@@ -73,8 +83,20 @@ export function AppShell() {
       </div>
 
       {/* Mobile bottom navigation */}
+      {more && (
+        <div className="fixed inset-0 z-30 bg-black/20 lg:hidden" onClick={() => setMore(false)}>
+          <div id="more-menu" className="absolute inset-x-3 bottom-20 rounded-2xl border border-line bg-surface p-2 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            {MORE.map(({ to, label, icon: Icon }) => (
+              <NavLink key={to} to={to} className={({ isActive }) => clsx("flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium", isActive ? "bg-surface-2 text-ink" : "text-ink-2")}>
+                <Icon className="size-5" aria-hidden />{label}
+                {badge(to) > 0 && <span className="ml-auto rounded-full bg-accent px-1.5 text-[11px] font-semibold text-white">{badge(to)}</span>}
+              </NavLink>
+            ))}
+          </div>
+        </div>
+      )}
       <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
-        {NAV.map(({ to, label, icon: Icon }) => (
+        {MOBILE.map(({ to, label, icon: Icon }) => (
           <NavLink key={to} to={to}
             className={({ isActive }) => clsx("relative flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium", isActive ? "text-accent" : "text-ink-3")}>
             <Icon className="size-5" aria-hidden />
@@ -82,6 +104,11 @@ export function AppShell() {
             {badge(to) > 0 && <span className="absolute right-[22%] top-1 size-2 rounded-full bg-accent" aria-label={`${badge(to)} need attention`} />}
           </NavLink>
         ))}
+        <button type="button" aria-expanded={more} aria-controls="more-menu" onClick={() => setMore((m) => !m)}
+          className={clsx("relative flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium", more || inMore ? "text-accent" : "text-ink-3")}>
+          <MoreHorizontal className="size-5" aria-hidden />More
+          {MORE.some((m) => badge(m.to) > 0) && <span className="absolute right-[22%] top-1 size-2 rounded-full bg-accent" aria-label="Needs attention" />}
+        </button>
       </nav>
     </div>
   );

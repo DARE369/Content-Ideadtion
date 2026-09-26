@@ -11,6 +11,8 @@ import { config } from "../config.js";
 import { postSigned } from "./webhook.js";
 import { withUtm } from "./utm.js";
 import { PLATFORMS, isPlatform, type Platform } from "../types.js";
+import { retrieveFacts, type KnowledgeFact } from "../knowledge/retrieve.js";
+import { finalizeOptimization, optimizationFeatures, optimizationRules, unverifiedFigures, youtubeKeywordCheck } from "../optimize/optimize.js";
 
 /**
  * Stage 2: handoff. Platforms selected -> one platform brief each, rebuilt natively
@@ -30,18 +32,52 @@ interface IdeaRow {
   confidence: "low" | "medium" | "high" | null;
   label: "proven" | "test";
   risks: string[];
+  product_id: string | null;
+  campaign_id: string | null;
+  campaign_phase: string | null;
 }
 
 async function loadIdea(db: Db, ideaId: string): Promise<IdeaRow> {
   const r = await db.query<IdeaRow>(
-    `select id, workspace_id, title, why_now, core_idea, content_type, features, evidence, relative_label, confidence, label, risks
+    `select id, workspace_id, title, why_now, core_idea, content_type, features, evidence, relative_label, confidence, label, risks,
+            product_id, campaign_id, campaign_phase
      from ideas where id = $1`, [ideaId],
   );
   if (!r.rows[0]) throw new Error(`idea ${ideaId} not found`);
   return r.rows[0];
 }
 
-function ideaBlock(idea: IdeaRow): string {
+/** What a brief needs beyond the idea: the product, the campaign, and the verified facts to use. */
+export interface BriefExtras {
+  product: { name: string; url: string | null } | null;
+  campaign: { id: string; name: string; phase: string | null; objective: string | null; key_message: string | null; offer: string | null; cta_text: string | null; cta_url: string | null } | null;
+  facts: KnowledgeFact[];
+  allowedText: string;
+}
+
+export async function briefExtras(db: Db, idea: IdeaRow, brain: WorkspaceBrain): Promise<BriefExtras> {
+  const p = idea.product_id
+    ? (await db.query<{ name: string; url: string | null }>("select name, url from products where id = $1", [idea.product_id])).rows[0] ?? null
+    : null;
+  const offer = !p && idea.features.offer && idea.features.offer !== "brand" ? brain.offers.find((o) => o.name === idea.features.offer) : undefined;
+  const product = p ?? (offer ? { name: offer.name, url: offer.url ?? null } : null);
+  const c = idea.campaign_id
+    ? (await db.query<{ id: string; name: string; key_message: string | null; offer: string | null; cta_text: string | null; cta_url: string | null; objective: string | null }>(
+        "select c.id, c.name, c.key_message, c.offer, c.cta_text, c.cta_url, o.title as objective from campaigns c left join objectives o on o.id = c.objective_id where c.id = $1",
+        [idea.campaign_id],
+      )).rows[0] ?? null
+    : null;
+  const cited = idea.evidence.map((e) => e.id).filter((id) => id.startsWith("kc_"));
+  const facts = await retrieveFacts(db, idea.workspace_id, { productIds: idea.product_id ? [idea.product_id] : [], cardIds: cited, limit: 12, perType: 3 }).catch(() => [] as KnowledgeFact[]);
+  const allowedText = [
+    idea.title, idea.core_idea, idea.why_now, ...(idea.evidence as { summary?: string }[]).map((e) => e.summary ?? ""),
+    ...facts.map((f) => `${f.title} ${f.body}`), ...brain.offers.map((o) => `${o.name} ${o.price ?? ""} ${o.description ?? ""}`),
+    c ? `${c.key_message ?? ""} ${c.offer ?? ""} ${c.cta_text ?? ""}` : "", brain.description ?? "",
+  ].join("\n");
+  return { product, campaign: c ? { ...c, phase: idea.campaign_phase } : null, facts, allowedText };
+}
+
+function ideaBlock(idea: IdeaRow, x?: BriefExtras): string {
   return [
     `Idea: ${idea.title}`,
     `Core idea: ${idea.core_idea}`,
@@ -50,6 +86,8 @@ function ideaBlock(idea: IdeaRow): string {
     idea.features.funnel_stage ? `Buyer stage: ${idea.features.funnel_stage}. Make the CTA fit this stage.` : null,
     `Planned features: ${Object.entries(idea.features).filter(([k]) => k !== "offer" && k !== "funnel_stage").map(([k, v]) => `${k}=${v}`).join(", ")}`,
     idea.risks.length ? `Risks to avoid: ${idea.risks.join("; ")}` : null,
+    x?.campaign ? `Campaign: ${x.campaign.name}${x.campaign.phase ? ` (phase: ${x.campaign.phase})` : ""}${x.campaign.key_message ? `. Key message: ${x.campaign.key_message}` : ""}${x.campaign.offer ? `. Offer: ${x.campaign.offer}` : ""}${x.campaign.cta_text ? `. Call to action: ${x.campaign.cta_text}` : ""}` : null,
+    x?.facts.length ? `Verified facts you may use (and the only source for numbers):\n${x.facts.map((f) => `- ${f.product ? `[${f.product}] ` : ""}${f.title}: ${f.body.replace(/\s+/g, " ").slice(0, 220)}`).join("\n")}` : null,
   ].filter(Boolean).join("\n");
 }
 
@@ -58,8 +96,13 @@ function ctaUrl(brain: WorkspaceBrain, offer?: string): string | null {
   return brain.offers.find((o) => o.name === offer && o.url)?.url ?? brain.offers.find((o) => o.url)?.url ?? brain.website_url ?? null;
 }
 
-function common(idea: IdeaRow, brain: WorkspaceBrain, briefId: string) {
+function common(idea: IdeaRow, brain: WorkspaceBrain, briefId: string, x?: BriefExtras) {
+  const stage = idea.features.funnel_stage;
   return {
+    ...(x?.product ? { product: x.product } : {}),
+    ...(x?.campaign ? { campaign: { id: x.campaign.id, name: x.campaign.name, phase: x.campaign.phase, objective: x.campaign.objective } } : {}),
+    ...(stage === "awareness" || stage === "consideration" || stage === "decision" ? { buyer_stage: stage } : {}),
+    ...(x?.facts.length ? { facts: x.facts.map((f) => ({ id: f.id, text: `${f.title}: ${f.body}`.slice(0, 300), url: f.url })) } : {}),
     schema: "brief.v1" as const,
     brief_id: briefId,
     idea_id: idea.id,
@@ -76,23 +119,34 @@ function common(idea: IdeaRow, brain: WorkspaceBrain, briefId: string) {
 
 const LINK_CTAS = new Set(["link_in_bio", "link"]);
 
-export async function buildPlatformBrief(db: Db, idea: IdeaRow, brain: WorkspaceBrain, platform: Platform): Promise<PlatformBrief> {
+export async function buildPlatformBrief(db: Db, idea: IdeaRow, brain: WorkspaceBrain, platform: Platform, extras?: BriefExtras): Promise<PlatformBrief> {
   const pb = playbook(platform);
+  const x = extras ?? await briefExtras(db, idea, brain);
   const out = await structured({
     db, task: `adapter:${platform}`, workspaceId: idea.workspace_id, tier: "fast",
     system: [ADAPTER_ROLE, brandBrainBlock(brain), playbookBlock([platform]), FEATURE_VOCAB, HONESTY_RULES],
-    content: `${ideaBlock(idea)}\n\nWrite the ${platform} brief. Allowed formats: ${pb.formats.join(", ")}.`,
+    content: `${ideaBlock(idea, x)}\n\n${optimizationRules(platform)}\n\nWrite the ${platform} brief. Allowed formats: ${pb.formats.join(", ")}.`,
     schema: AdapterOutput,
   });
   const briefId = newId("brf");
   const format = pb.formats.includes(out.format) ? out.format : pb.default_format;
-  const url = ctaUrl(brain, idea.features.offer);
+  const url = x.campaign?.cta_url ?? x.product?.url ?? ctaUrl(brain, idea.features.offer);
   const lengths =
     out.length_seconds_min != null && out.length_seconds_max != null && pb.length_seconds
       ? ([Math.max(0, out.length_seconds_min), Math.min(out.length_seconds_max, pb.length_seconds[1])] as [number, number])
       : pb.length_seconds;
+  const brandColors = brain.brand_kit.colors.filter((c) => /^#[0-9a-f]{3,8}$/i.test(c));
+  const optimization = finalizeOptimization(platform, out.optimization ?? EMPTY_OPTIMIZATION, { brandColors, lengthSeconds: lengths?.[1] ?? null });
+  if (platform === "youtube") {
+    optimization.keyword_check = await youtubeKeywordCheck(db, optimization.primary_keyword, brain.country ?? brain.trends_geo, brain.language).catch(() => null);
+  }
+  const reviewNotes = figureNotes(
+    [out.hooks.join(" "), out.script_or_copy, out.caption, ...out.structure.map((b) => `${b.on_screen_text ?? ""} ${b.voiceover ?? ""}`), ...(optimization.titles ?? []), optimization.description ?? ""].join("\n"),
+    x.allowedText,
+  );
+  await db.query("update ideas set features = features || $2::jsonb where id = $1", [idea.id, JSON.stringify(optimizationFeatures(optimization))]);
   return PlatformBrief.parse({
-    ...common(idea, brain, briefId),
+    ...common(idea, brain, briefId, x),
     kind: "platform",
     platform,
     format,
@@ -108,23 +162,38 @@ export async function buildPlatformBrief(db: Db, idea: IdeaRow, brain: Workspace
     },
     length_seconds: lengths,
     aspect_ratio: aspectRatioFor(pb, format),
-    ...(out.title ? { title: out.title } : {}),
-    ...(out.thumbnail_brief ? { thumbnail_brief: out.thumbnail_brief } : {}),
+    ...((optimization.titles?.[0] ?? out.title) ? { title: optimization.titles?.[0] ?? out.title } : {}),
+    ...((out.thumbnail_brief || optimization.thumbnails?.[0]) ? { thumbnail_brief: out.thumbnail_brief || `${optimization.thumbnails![0]!.concept} — text: "${optimization.thumbnails![0]!.text}"` } : {}),
+    optimization,
+    ...(reviewNotes.length ? { review_notes: reviewNotes } : {}),
     do_not: [...new Set([...pb.do_not, ...out.do_not])],
   });
 }
 
-export async function buildGeneralBrief(db: Db, idea: IdeaRow, brain: WorkspaceBrain): Promise<GeneralBrief> {
+const EMPTY_OPTIMIZATION: AdapterOutput["optimization"] = {
+  primary_keyword: "", secondary_keywords: [], titles: [], title_style: "statement", description: "", chapters: [], thumbnails: [],
+  thumbnail_style: "scene", caption_first_line: "", on_screen_text: [], spoken_keyword_line: "", alt_text: "", hashtags: [], misspelling_tags: [],
+};
+
+/** Figures the brief uses that its sources don't contain: flagged for a human, never silently kept. */
+function figureNotes(text: string, allowed: string): string[] {
+  return unverifiedFigures(text, allowed).slice(0, 6).map((f) => `Check "${f}": it isn't in your knowledge or this idea's evidence. Confirm it or remove it before publishing.`);
+}
+
+export async function buildGeneralBrief(db: Db, idea: IdeaRow, brain: WorkspaceBrain, extras?: BriefExtras): Promise<GeneralBrief> {
+  const x = extras ?? await briefExtras(db, idea, brain);
   const out = await structured({
     db, task: "adapter:general", workspaceId: idea.workspace_id, tier: "fast",
     system: [GENERAL_ROLE, brandBrainBlock(brain), FEATURE_VOCAB, HONESTY_RULES],
-    content: ideaBlock(idea),
+    content: ideaBlock(idea, x),
     schema: GeneralOutput,
   });
   const briefId = newId("brf");
-  const url = ctaUrl(brain, idea.features.offer);
+  const url = x.campaign?.cta_url ?? x.product?.url ?? ctaUrl(brain, idea.features.offer);
+  const reviewNotes = figureNotes([out.hooks.join(" "), out.messaging.join(" "), out.caption].join("\n"), x.allowedText);
   return GeneralBrief.parse({
-    ...common(idea, brain, briefId),
+    ...common(idea, brain, briefId, x),
+    ...(reviewNotes.length ? { review_notes: reviewNotes } : {}),
     kind: "general",
     hooks: out.hooks.slice(0, 3),
     messaging: out.messaging,
@@ -164,6 +233,7 @@ export async function handOff(db: Db, ideaId: string, platforms: string[]): Prom
   );
   const reuse = (p: Platform | null) => drafts.rows.find((d) => (p ? d.platform === p : d.kind === "general"));
 
+  const extras = await briefExtras(db, idea, brain);
   const briefs = await Promise.all(
     (wanted.length ? wanted : [null]).map(async (platform) => {
       const draft = reuse(platform);
@@ -171,7 +241,7 @@ export async function handOff(db: Db, ideaId: string, platforms: string[]): Prom
         await db.query("update briefs set status = 'queued' where id = $1 and status = 'draft'", [draft.id]);
         return draft.payload;
       }
-      const b = platform ? await buildPlatformBrief(db, idea, brain, platform) : await buildGeneralBrief(db, idea, brain);
+      const b = platform ? await buildPlatformBrief(db, idea, brain, platform, extras) : await buildGeneralBrief(db, idea, brain, extras);
       await insertBrief(db, b, "queued");
       return b;
     }),
@@ -187,7 +257,7 @@ export async function handOff(db: Db, ideaId: string, platforms: string[]): Prom
 export async function topIdeaFor(db: Db, workspaceId: string, platform: Platform): Promise<string | null> {
   const r = await db.query<{ id: string }>(
     `select id from ideas where workspace_id = $1 and platform = $2 and status = 'shortlisted'
-     order by (slot = 'exploit') desc, score desc nulls last limit 1`,
+     order by (slot = 'exploit') desc, score desc nulls last, id limit 1`,
     [workspaceId, platform],
   );
   return r.rows[0]?.id ?? null;

@@ -52,6 +52,14 @@ function answer(system: string, user: string): unknown {
       cta: { type: "link_in_bio", text: "Get the pricing sheet" },
       length_seconds_min: 20, length_seconds_max: 35,
       do_not: ["no logo intro"],
+      optimization: {
+        primary_keyword: "custom cake price lagos", secondary_keywords: ["wedding cake cost"], title_style: "number", thumbnail_style: "product",
+        titles: ["Custom cake price in Lagos: ₦45k vs ₦52k", "What a ₦45k cake really costs", "Why custom cakes lose money"],
+        description: "Custom cake price in Lagos, line by line.", chapters: [{ t: "0:00", title: "Hook" }, { t: "0:05", title: "Too close" }, { t: "0:12", title: "Costs" }, { t: "0:24", title: "Price" }],
+        thumbnails: [{ concept: "Cake next to a receipt", text: "₦45k cake costs ₦52k to make", subject: "cake", layout: "left subject, right text" }],
+        caption_first_line: "Custom cake price in Lagos, honestly", on_screen_text: ["custom cake price"], spoken_keyword_line: "Here's our custom cake price", alt_text: "A three-tier cake beside a receipt",
+        hashtags: ["lagoscakes", "#cakeprice", "weddingcake", "a", "b1", "c2", "d3"], misspelling_tags: ["custum cake"],
+      },
     };
   }
   if (system.startsWith(GENERAL_ROLE)) {

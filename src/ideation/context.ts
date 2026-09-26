@@ -1,3 +1,5 @@
+import { offersFromProducts } from "../knowledge/products.js";
+import { renderFacts, retrieveFacts, type KnowledgeFact } from "../knowledge/retrieve.js";
 import type { Db } from "../db.js";
 import type { BrandBrain } from "../contracts/brandBrain.js";
 import { loadEstimates, probBeatsBaseline } from "../learning/model.js";
@@ -23,8 +25,11 @@ export async function loadBrain(db: Db, workspaceId: string): Promise<WorkspaceB
   );
   const row = r.rows[0];
   if (!row) return null;
+  // Products are the source of truth for what the business sells (week 2).
+  const offers = await offersFromProducts(db, workspaceId).catch(() => null);
   return {
     ...row,
+    offers: offers ?? row.offers,
     description: row.description ?? undefined,
     industry: row.industry ?? undefined,
     social_links: row.social_links ?? [],
@@ -62,6 +67,11 @@ export interface IdeationContext {
   rules: { platform: string | null; feature: string; value: string; action: string; share: number | null; rationale: string }[];
   patterns: { platform: Platform; feature: string; value: string; n: number; p_beat: number; label: "proven" | "unproven" | "weak" }[];
   postsWithResults: Record<string, number>;
+  /** Business knowledge (week 2): up to ~20 facts, the growth plan and active campaigns. */
+  facts: KnowledgeFact[];
+  products: { id: string; name: string }[];
+  objectives: { id: string; title: string; weight: number; segment: string | null; products: string[]; motion: string[] }[];
+  campaigns: { id: string; name: string; goal: string; key_message: string | null; products: string[]; start_date: string | null; end_date: string | null; objective_id: string | null }[];
 }
 
 export async function loadContext(db: Db, workspaceId: string): Promise<IdeationContext | null> {
@@ -125,9 +135,32 @@ export async function loadContext(db: Db, workspaceId: string): Promise<Ideation
     "select platform, posts_with_pi from v_platform_post_counts where workspace_id = $1", [workspaceId],
   );
 
+  const objectives = (await db.query<IdeationContext["objectives"][number] & { product_ids: string[] }>(
+    `select o.id, o.title, o.weight::float8 as weight, o.segment, o.motion, o.product_ids,
+            coalesce((select array_agg(p.name) from products p where p.id = any(o.product_ids)), '{}') as products
+     from objectives o where o.workspace_id = $1 and o.status = 'active' order by o.weight desc`,
+    [workspaceId],
+  )).rows;
+  const campaigns = (await db.query<IdeationContext["campaigns"][number] & { product_ids: string[] }>(
+    `select c.id, c.name, c.goal, c.key_message, c.start_date::text, c.end_date::text, c.objective_id, c.product_ids,
+            coalesce((select array_agg(p.name) from products p where p.id = any(c.product_ids)), '{}') as products
+     from campaigns c where c.workspace_id = $1 and c.status = 'active' and (c.end_date is null or c.end_date >= current_date)`,
+    [workspaceId],
+  )).rows;
+  const focus = [...objectives.flatMap((o) => o.product_ids), ...campaigns.flatMap((c) => c.product_ids)];
+  const facts = await retrieveFacts(db, workspaceId, { productIds: focus }).catch(() => [] as KnowledgeFact[]);
+
+  const products = (await db.query<{ id: string; name: string }>(
+    "select id, name from products where workspace_id = $1 and confirmed and status <> 'retired'", [workspaceId],
+  )).rows;
+
   return {
     brain,
     platforms,
+    facts,
+    products,
+    objectives: objectives.map(({ product_ids: _p, ...o }) => o),
+    campaigns: campaigns.map(({ product_ids: _p, ...c }) => c),
     ownPosts: own.rows,
     competitorWinners: winners.rows,
     signals: signals.rows,
@@ -161,6 +194,17 @@ export function renderContext(ctx: IdeationContext): string {
   for (const s of market) lines.push(`${s.id} | ${s.kind ?? "news"} | ${s.published ?? "?"} | ${fmt(s.momentum)} | ${s.product ?? "–"} | ${s.title ?? ""} — ${s.summary ?? ""}`);
   lines.push("", "## Trend signals (momentum 0-1, >0.5 rising)");
   for (const s of ctx.signals.filter((x) => x.source !== "claude_web_search")) lines.push(`${s.id} | ${s.source} | ${fmt(s.momentum)} | ${s.title ?? ""}`);
+  const facts = renderFacts(ctx.facts);
+  if (facts) lines.push("", facts);
+  if (ctx.objectives.length) {
+    const total = ctx.objectives.reduce((s, o) => s + o.weight, 0) || 1;
+    lines.push("", "## Growth plan: business development objectives this quarter. Share of ideas per objective follows the weight; name the objective each idea serves.");
+    for (const o of ctx.objectives) lines.push(`${o.title} | ${Math.round((o.weight / total) * 100)}% of ideas | segment: ${o.segment ?? "–"} | products: ${o.products.join(", ") || "–"} | path to sale: ${o.motion.join(" → ") || "–"}`);
+  }
+  if (ctx.campaigns.length) {
+    lines.push("", "## Active campaigns (their own planned posts exist; your ideas can support them)");
+    for (const c of ctx.campaigns) lines.push(`${c.name} | ${c.goal} | ${c.start_date ?? "?"} to ${c.end_date ?? "?"} | products: ${c.products.join(", ") || "–"} | message: ${c.key_message ?? "–"}`);
+  }
   lines.push("", "## Active guidance rules from the last report");
   for (const r of ctx.rules) lines.push(`${r.platform ?? "all"} | ${r.action} ${r.feature}=${r.value}${r.share != null ? ` in ${Math.round(r.share * 100)}% of posts` : ""} | ${r.rationale}`);
   return lines.join("\n");

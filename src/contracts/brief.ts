@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { GOALS, PLATFORMS } from "../types.js";
+import { Optimization } from "../optimize/optimize.js";
 
 /** brief.v1 — the JSON the studio receives. Idempotent on brief_id. */
 
@@ -46,6 +47,12 @@ const Common = z.object({
   score: Score,
   label: z.enum(["proven", "test"]),
   created_at: z.string().datetime(),
+  // Week 2 additions (optional, so brief.v1 stays compatible).
+  product: z.object({ name: z.string(), url: z.string().nullable() }).optional(),
+  campaign: z.object({ id: z.string(), name: z.string(), phase: z.string().nullable(), objective: z.string().nullable() }).optional(),
+  buyer_stage: z.enum(["awareness", "consideration", "decision"]).optional(),
+  facts: z.array(z.object({ id: z.string(), text: z.string(), url: z.string().nullable() })).optional(),
+  review_notes: z.array(z.string()).optional(),
 });
 
 export const PlatformBrief = Common.extend({
@@ -59,6 +66,7 @@ export const PlatformBrief = Common.extend({
   // Title and thumbnail matter most on YouTube; optional elsewhere.
   title: z.string().optional(),
   thumbnail_brief: z.string().optional(),
+  optimization: Optimization.optional(),
 });
 
 export const GeneralBrief = Common.extend({

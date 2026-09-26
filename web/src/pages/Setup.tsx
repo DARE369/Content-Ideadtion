@@ -8,13 +8,14 @@ import { CompetitorsEditor } from "../components/CompetitorsEditor";
 import { NarratedProgress } from "../components/Progress";
 import { useToast } from "../components/Toast";
 import { WebsiteAnalysis } from "../components/WebsiteAnalysis";
+import { ScanPanel } from "../components/ScanPanel";
 import { Button, Card, ErrorNote, Field, inputClass, Skeleton } from "../components/ui";
 import { api } from "../lib/api";
 import { IDEA_STEPS } from "../lib/format";
 import type { AnalyseInput, BrandBrain, BrandDraft, Goal } from "../lib/types";
 import { useAppConfig, useSummary, useWs } from "../lib/workspace";
 
-const STEPS = ["Your website", "Your brand", "Competitors", "First ideas"];
+const STEPS = ["Your website", "Your brand", "Your products", "Competitors", "First ideas"];
 
 export const EMPTY_BRAIN: BrandBrain = {
   website_url: null, brand_kit: { colors: [], fonts: [] }, social_links: [], goal: "engagement", language: "en-GB",
@@ -29,7 +30,7 @@ export function toFormBrain(b: Partial<BrandBrain> | null | undefined): BrandBra
 export function Setup() {
   const ws = useWs();
   const [params, setParams] = useSearchParams();
-  const step = Math.min(3, Math.max(0, Number(params.get("step") ?? 0)));
+  const step = Math.min(4, Math.max(0, Number(params.get("step") ?? 0)));
   const go = (n: number) => setParams({ step: String(n) });
   const summary = useSummary();
   // Only ask for a Brand Brain once one exists; a brand-new workspace has none yet.
@@ -48,7 +49,7 @@ export function Setup() {
           <div className="flex items-center gap-2 text-sm font-semibold"><img src="/favicon.svg" alt="" className="size-7" />{summary.data?.name ?? "Set up"}</div>
           {summary.data?.confirmed_at && <Button variant="ghost" size="sm" onClick={() => window.location.assign("/week")}>Skip to app</Button>}
         </div>
-        <ol className="mb-8 grid grid-cols-4 gap-2" aria-label="Setup progress">
+        <ol className="mb-8 grid grid-cols-5 gap-2" aria-label="Setup progress">
           {STEPS.map((s, i) => (
             <li key={s} aria-current={i === step ? "step" : undefined}>
               <div className={`h-1 rounded-full ${i <= step ? "bg-accent" : "bg-surface-3"}`} />
@@ -60,8 +61,9 @@ export function Setup() {
         </ol>
         {step === 0 && <BasicsStep onDone={() => go(1)} />}
         {step === 1 && <ReviewStep existing={existing.data ?? null} loading={summary.isLoading || (existing.isLoading && existing.fetchStatus !== "idle")} onBack={() => go(0)} onDone={() => go(2)} />}
-        {step === 2 && <CompetitorStep onBack={() => go(1)} onDone={() => go(3)} />}
-        {step === 3 && <FirstIdeasStep />}
+        {step === 2 && <KnowledgeStep onBack={() => go(1)} onDone={() => go(3)} />}
+        {step === 3 && <CompetitorStep onBack={() => go(2)} onDone={() => go(4)} />}
+        {step === 4 && <FirstIdeasStep />}
       </div>
     </div>
   );
@@ -239,6 +241,26 @@ function CompetitorStep({ onBack, onDone }: { onBack: () => void; onDone: () => 
         <Button variant="ghost" onClick={onBack} icon={<ArrowLeft className="size-4" />}>Back</Button>
         <Button variant="primary" onClick={onDone}>{summary.data?.competitors ? "Continue" : "Skip for now"} <ArrowRight className="size-4" aria-hidden /></Button>
       </div>
+    </Card>
+  );
+}
+
+/** Every page of every site the business owns: products, services, proof, prices, FAQs. */
+function KnowledgeStep({ onBack, onDone }: { onBack: () => void; onDone: () => void }) {
+  const cfg = useAppConfig();
+  return (
+    <Card className="p-6 sm:p-8">
+      <h1 className="text-xl font-semibold">Find everything you sell</h1>
+      <p className="mt-1 text-sm text-ink-2">
+        We go beyond your homepage: your sitemap, menus and linked sites (like a separate product site), then read the pages about products, services,
+        pricing, case studies and FAQs. Every fact keeps a link to where it came from, and ideas only use numbers found there.
+      </p>
+      <div className="mt-6">{cfg.data?.ai_configured ? <ScanPanel /> : <p className="text-sm text-ink-2">Reading pages needs an Anthropic API key on the server. You can add facts by hand later in Knowledge.</p>}</div>
+      <div className="mt-8 flex justify-between gap-2 border-t border-line pt-4">
+        <Button variant="ghost" onClick={onBack} icon={<ArrowLeft className="size-4" />}>Back</Button>
+        <Button variant="primary" onClick={onDone}>Continue <ArrowRight className="size-4" aria-hidden /></Button>
+      </div>
+      <p className="mt-2 text-right text-xs text-ink-3">The scan keeps going in the background if you continue; review the facts later in Knowledge.</p>
     </Card>
   );
 }

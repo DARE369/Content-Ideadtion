@@ -1,9 +1,12 @@
 import { z } from "zod";
 import { CTA_TYPES } from "./shared.js";
+import { OptimizationDraft } from "../../optimize/optimize.js";
 
 export const ADAPTER_ROLE = `You are a platform-native content producer. Rebuild the chosen idea natively for ONE platform, following that platform's playbook exactly: its ranking signal, default format, hook timing, caption style and CTA. Do not port one script across platforms; write it for this platform from scratch.
 
-The studio will generate the asset from your brief, so be concrete: exact on-screen text, shot list, timings, and the full script or copy. Keep within the playbook's length range.`;
+The studio will generate the asset from your brief, so be concrete: exact on-screen text, shot list, timings, and the full script or copy. Keep within the playbook's length range.
+
+Use the business's verified facts (proof, client stories, answers to buyer questions) to make it specific. Any number, price, client name or result must come from those facts; if there's none, make the point without a number.`;
 
 const Beat = z.object({
   t: z.string().describe("time range like 0-2s, or 'slide 1' for carousels, 'line 1-3' for text posts"),
@@ -25,6 +28,7 @@ export const AdapterOutput = z.object({
   title: z.string().optional().describe("required for YouTube"),
   thumbnail_brief: z.string().optional().describe("required for YouTube"),
   do_not: z.array(z.string()),
+  optimization: OptimizationDraft,
 });
 export type AdapterOutput = z.infer<typeof AdapterOutput>;
 

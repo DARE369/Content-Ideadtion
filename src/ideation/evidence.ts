@@ -25,6 +25,11 @@ export function resolveEvidence(ctx: IdeationContext, ids: string[]): Evidence[]
       out.push({ kind: "comment", id, url: null, summary: `${q.origin === "own" ? "Your audience" : "A competitor's audience"} asked: "${q.text.slice(0, 140)}"` });
       continue;
     }
+    const f = ctx.facts.find((x) => x.id === id);
+    if (f) {
+      out.push({ kind: "business", id, url: f.url, summary: `${f.product ? `${f.product}: ` : ""}${f.title}${f.body && f.body !== f.title ? ` — ${f.body.slice(0, 140)}` : ""}` });
+      continue;
+    }
     const s = ctx.signals.find((x) => x.id === id);
     if (s?.source === "claude_web_search") {
       out.push({ kind: "web", id, url: s.url, summary: `${MARKET_KIND_TEXT[s.kind ?? ""] ?? "In the news"}${s.published ? ` (${s.published})` : ""}: ${s.title ?? ""}` });

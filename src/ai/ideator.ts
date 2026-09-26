@@ -50,5 +50,6 @@ export function validEvidenceIds(ctx: IdeationContext): Set<string> {
     ...ctx.competitorWinners.map((w) => w.id),
     ...ctx.signals.map((s) => s.id),
     ...ctx.questions.map((q) => q.id),
+    ...ctx.facts.map((f) => f.id),
   ]);
 }

@@ -52,6 +52,7 @@ const LIMIT_DEFAULTS: Record<string, { capacity: number; periodMs: number }> = {
   youtube_analytics: { capacity: 200, periodMs: 60_000 },
   wikimedia: { capacity: 100, periodMs: 1_000 },
   stackexchange: { capacity: 30, periodMs: 1_000 },
+  websites: { capacity: 20, periodMs: 5_000 }, // polite crawling: about 4 requests a second per site
   default: { capacity: 60, periodMs: 60_000 },
 };
 
@@ -132,6 +133,51 @@ export async function fetchText(url: string, opts: RequestOptions = {}): Promise
   const text = await res.text();
   if (!res.ok) throw new HttpError(res.status, url, text);
   return text;
+}
+
+export interface PageResponse {
+  status: number;
+  url: string;
+  text: string;
+  contentType: string;
+  etag: string | null;
+  lastModified: string | null;
+}
+
+/**
+ * A single conditional GET for crawling: sends If-None-Match / If-Modified-Since
+ * when we have them, so an unchanged page answers 304 and costs nothing.
+ * Never throws for HTTP status; network errors and timeouts do throw.
+ */
+export async function fetchPage(
+  url: string,
+  opts: { etag?: string | null; lastModified?: string | null; timeoutMs?: number; userAgent?: string; maxBytes?: number; fetchImpl?: typeof fetch } = {},
+): Promise<PageResponse> {
+  let host = "";
+  try {
+    host = new URL(url).hostname;
+  } catch { /* fetch below rejects it */ }
+  const bucket = bucketFor(`websites:${host}`);
+  for (let wait = bucket.tryTake(1); wait > 0; wait = bucket.tryTake(1)) await sleep(Math.min(wait, 1_000));
+  const res = await (opts.fetchImpl ?? fetch)(url, {
+    headers: {
+      "user-agent": opts.userAgent ?? config().HTTP_USER_AGENT,
+      accept: "text/html,application/xhtml+xml,application/xml,text/xml,text/plain,*/*;q=0.5",
+      ...(opts.etag ? { "if-none-match": opts.etag } : {}),
+      ...(opts.lastModified ? { "if-modified-since": opts.lastModified } : {}),
+    },
+    redirect: "follow",
+    signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000),
+  });
+  const contentType = res.headers.get("content-type") ?? "";
+  let text = "";
+  if (res.status !== 304 && /text|html|xml|json/i.test(contentType || "text/html")) {
+    text = await res.text();
+    if (opts.maxBytes && text.length > opts.maxBytes) text = text.slice(0, opts.maxBytes);
+  } else {
+    await res.body?.cancel().catch(() => undefined);
+  }
+  return { status: res.status, url: res.url || url, text, contentType, etag: res.headers.get("etag"), lastModified: res.headers.get("last-modified") };
 }
 
 /** Keep tokens and keys out of logs and error messages. */

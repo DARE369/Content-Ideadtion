@@ -14,6 +14,7 @@ import { loadContext, type IdeationContext } from "./context.js";
 import { citedMomentum, citedOutlierRatios, resolveEvidence } from "./evidence.js";
 import { DUPLICATE_SIMILARITY, nearestSimilarity, whiteSpace } from "./whitespace.js";
 import { applyGuidance } from "./guidance.js";
+import { markUsed } from "../knowledge/retrieve.js";
 import { prepareDraftBriefs } from "../handoff/briefs.js";
 
 /**
@@ -42,6 +43,18 @@ export function matchOffer(sells: string | undefined, offers: { name: string }[]
   return loose?.name ?? "brand";
 }
 
+/** The chain an idea hangs on: objective -> product, and whether real evidence backs it. */
+export function ideaLinks(ctx: IdeationContext, idea: { objective?: string; sells?: string; evidence_ids: string[] }, evidence: { kind: string }[]) {
+  const objective = idea.objective?.trim() ? ctx.objectives.find((o) => o.title.toLowerCase() === idea.objective!.trim().toLowerCase()) : undefined;
+  const offer = matchOffer(idea.sells, ctx.products);
+  const product = ctx.products.find((p) => p.name === offer);
+  return {
+    objective_id: objective?.id ?? null,
+    product_id: product?.id ?? null,
+    grounded: evidence.some((e) => e.kind !== "trend"),
+  };
+}
+
 export function toFeatures(idea: Reviewed, language: string, offers: { name: string }[] = []): Features {
   const f: Features = { ...idea.features, language, offer: matchOffer(idea.sells, offers) };
   if (idea.funnel_stage) f.funnel_stage = idea.funnel_stage;
@@ -52,6 +65,8 @@ export function toFeatures(idea: Reviewed, language: string, offers: { name: str
 /** Independent cited sources that aren't generic trend feeds (those only count when clearly rising). */
 export function outsideSources(ctx: IdeationContext, ids: string[]): number {
   return resolveEvidence(ctx, [...new Set(ids)]).filter((e) => {
+    // Business facts ground an idea but say nothing about how it will perform.
+    if (e.kind === "business") return false;
     if (e.kind !== "trend") return true;
     const m = ctx.signals.find((s) => s.id === e.id)?.momentum ?? 0;
     return m >= 0.6;
@@ -131,15 +146,20 @@ export async function precomputeWorkspace(db: Db, workspaceId: string, rng: Rng 
   const allScores = scored.map((s) => s.score);
   for (const s of scored) {
     const slot = selected.get(s.id);
+    const evidence = resolveEvidence(ctx, s.idea.evidence_ids);
+    const links = ideaLinks(ctx, s.idea, evidence);
+    if (slot) await markUsed(db, workspaceId, s.idea.evidence_ids);
     await db.query(
       `insert into ideas (id, workspace_id, run_id, mode, platform, title, why_now, core_idea, evidence, features, score,
-          score_components, relative_label, confidence, content_type, effort, risks, slot, status, embedding, expires_at)
-       values ($1,$2,$3,'give_me_ideas',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19, now() + interval '14 days')`,
+          score_components, relative_label, confidence, content_type, effort, risks, slot, status, embedding, expires_at,
+          objective_id, product_id, grounded)
+       values ($1,$2,$3,'give_me_ideas',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19, now() + interval '14 days', $20, $21, $22)`,
       [s.id, workspaceId, runId, s.platform, s.idea.title, s.idea.why_now, s.idea.core_idea,
-        JSON.stringify(resolveEvidence(ctx, s.idea.evidence_ids)), JSON.stringify(s.features), s.score,
+        JSON.stringify(evidence), JSON.stringify(s.features), s.score,
         JSON.stringify(s.components), relativeLabel(s.score, allScores),
         confidenceLabel(s.evidenceN, s.platform ? ctx.postsWithResults[s.platform] ?? 0 : 0, s.outside),
-        s.idea.content_type, s.idea.effort, s.idea.risks, slot ?? "explore", slot ? "shortlisted" : "candidate", toVector(s.embedding)],
+        s.idea.content_type, s.idea.effort, s.idea.risks, slot ?? "explore", slot ? "shortlisted" : "candidate", toVector(s.embedding),
+        links.objective_id, links.product_id, links.grounded],
     );
   }
   // The new shortlist replaces the previous one (selected/briefed ideas are untouched).

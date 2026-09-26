@@ -76,7 +76,7 @@ export function PostDetailPage() {
         )}
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_18rem]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <Card as="section" className="p-5">
           <SectionTitle>{latest ? `All numbers · at ${OFFSET_NAME[latest.offset_label] ?? latest.offset_label}` : "All numbers"}</SectionTitle>
           <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">

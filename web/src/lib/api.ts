@@ -1,5 +1,6 @@
 import type {
-  Account, AnalyseInput, AnalyseStage, AppConfig, BrandBrain, BrandBrainRow, BrandDraft, CompetitorSuggestion, BriefDetail, BriefListItem, BriefPayload, Competitor, CostRow, IdeaCard,
+  Acceptance, Account, AnalyseInput, AnalyseStage, AppConfig, Campaign, CampaignIdea, CampaignInput, CampaignResults, CardType, CoverageRow, KnowledgeCard,
+  Objective, ObjectiveInput, Product, ScanPage, ScanPreview, SourceRow, UploadRow, BrandBrain, BrandBrainRow, BrandDraft, CompetitorSuggestion, BriefDetail, BriefListItem, BriefPayload, Competitor, CostRow, IdeaCard,
   Learning, Match, Overview, Platform, PostDetail, PostRow, ReportDetail, ReportListItem, Summary, WorkspaceListItem,
 } from "./types";
 
@@ -80,9 +81,60 @@ const get = <T,>(p: string) => request<T>("GET", p);
 const post = <T,>(p: string, b?: unknown, o?: RequestOpts) => request<T>("POST", p, b ?? {}, o);
 const put = <T,>(p: string, b: unknown) => request<T>("PUT", p, b);
 const patch = <T,>(p: string, b: unknown) => request<T>("PATCH", p, b);
+const putO = <T,>(p: string, b: unknown, o?: RequestOpts) => request<T>("PUT", p, b, o);
 const del = <T,>(p: string) => request<T>("DELETE", p);
 
+const W = (ws: string) => `/v1/workspaces/${ws}`;
+
 export const api = {
+  // --- Knowledge -------------------------------------------------------------------
+  sources: (ws: string) => get<{ sources: SourceRow[] }>(`${W(ws)}/sources`).then((r) => r.sources),
+  addSource: (ws: string, url: string, role = "other") => post<SourceRow>(`${W(ws)}/sources`, { url, role }),
+  setSource: (ws: string, id: string, status: "active" | "rejected") => patch(`${W(ws)}/sources/${id}`, { status }),
+  previewScan: (ws: string, extraUrls: string[] = []) => post<ScanPreview>(`${W(ws)}/scans`, { extra_urls: extraUrls }, { timeoutMs: 90_000 }),
+  latestScan: (ws: string) => get<{ scan: ScanPreview | null }>(`${W(ws)}/scans/latest`).then((r) => r.scan),
+  scan: (ws: string, id: string) => get<ScanPreview>(`${W(ws)}/scans/${id}`),
+  scanPages: (ws: string, id: string) => get<{ pages: ScanPage[] }>(`${W(ws)}/scans/${id}/pages`).then((r) => r.pages),
+  selectScanPages: (ws: string, id: string, pageIds: string[]) => putO<ScanPreview>(`${W(ws)}/scans/${id}/pages`, { page_ids: pageIds }),
+  startScan: (ws: string, id: string) => post<ScanPreview>(`${W(ws)}/scans/${id}/start`, {}, { timeoutMs: 180_000 }),
+  cards: (ws: string, q: { status?: string; type?: string; product?: string; q?: string } = {}) => {
+    const qs = new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]).toString();
+    return get<{ cards: KnowledgeCard[]; counts: Record<string, number> }>(`${W(ws)}/cards${qs ? `?${qs}` : ""}`);
+  },
+  addCard: (ws: string, c: { type: CardType; title: string; body: string; product_ids: string[] }) => post<{ id: string }>(`${W(ws)}/cards`, c),
+  updateCard: (ws: string, id: string, c: Partial<Pick<KnowledgeCard, "status" | "type" | "title" | "body" | "product_ids">>) => patch(`${W(ws)}/cards/${id}`, c),
+  bulkCards: (ws: string, ids: string[], status: "approved" | "rejected" | "suggested") => post<{ updated: number }>(`${W(ws)}/cards/bulk`, { ids, status }),
+  mergeCards: (ws: string, ids: string[]) => post<{ id: string }>(`${W(ws)}/cards/merge`, { ids }),
+  coverage: (ws: string) => get<{ products: CoverageRow[] }>(`${W(ws)}/coverage`).then((r) => r.products),
+  products: (ws: string, all = false) => get<{ products: Product[] }>(`${W(ws)}/products${all ? "?all=1" : ""}`).then((r) => r.products),
+  product: (ws: string, id: string) => get<{ product: Product; cards: KnowledgeCard[] }>(`${W(ws)}/products/${id}`),
+  createProduct: (ws: string, p: Partial<Product> & { name: string }) => post<Product>(`${W(ws)}/products`, p),
+  updateProduct: (ws: string, id: string, p: Partial<Product>) => patch<Product>(`${W(ws)}/products/${id}`, p),
+  removeProduct: (ws: string, id: string) => del(`${W(ws)}/products/${id}`),
+  refreshSummaries: (ws: string) => post<{ refreshed: number }>(`${W(ws)}/products/summaries`, {}, { timeoutMs: 120_000 }),
+  uploads: (ws: string) => get<{ uploads: UploadRow[]; storage: boolean }>(`${W(ws)}/uploads`),
+  createUpload: (ws: string, f: { filename: string; mime: string; size: number; sha256: string }) =>
+    post<{ upload: UploadRow; upload_url: string | null; existing: boolean; storage: boolean }>(`${W(ws)}/uploads`, f),
+  processUpload: (ws: string, id: string, b: { text?: string; image?: { media_type: string; data: string }; pages?: number; scanned?: boolean }) =>
+    post<UploadRow>(`${W(ws)}/uploads/${id}/process`, b, { timeoutMs: 170_000 }),
+  uploadLink: (ws: string, id: string) => get<{ url: string | null }>(`${W(ws)}/uploads/${id}/link`).then((r) => r.url),
+  deleteUpload: (ws: string, id: string) => del(`${W(ws)}/uploads/${id}`),
+  acceptance: (ws: string) => get<Acceptance>(`${W(ws)}/acceptance`),
+
+  // --- Plan ------------------------------------------------------------------------
+  objectives: (ws: string) => get<{ objectives: Objective[] }>(`${W(ws)}/objectives`).then((r) => r.objectives),
+  saveObjective: (ws: string, o: ObjectiveInput, id?: string) => (id ? putO<Objective>(`${W(ws)}/objectives/${id}`, o) : post<Objective>(`${W(ws)}/objectives`, o)),
+  deleteObjective: (ws: string, id: string) => del(`${W(ws)}/objectives/${id}`),
+  draftGrowthPlan: (ws: string, a: { must_happen: string; customers: string; key_products: string; path_to_sale: string; measure: string }) =>
+    post<{ objectives: ObjectiveInput[] }>(`${W(ws)}/growth-plan/draft`, a, { timeoutMs: 120_000 }).then((r) => r.objectives),
+  campaigns: (ws: string) => get<{ campaigns: Campaign[] }>(`${W(ws)}/campaigns`).then((r) => r.campaigns),
+  campaign: (ws: string, id: string) => get<{ campaign: Campaign; ideas: CampaignIdea[]; results: CampaignResults }>(`${W(ws)}/campaigns/${id}`),
+  draftCampaign: (ws: string, sentence: string, cardIds: string[] = []) =>
+    post<{ campaign: CampaignInput }>(`${W(ws)}/campaigns/draft`, { sentence, card_ids: cardIds }, { timeoutMs: 90_000 }).then((r) => r.campaign),
+  saveCampaign: (ws: string, c: CampaignInput, id?: string) => (id ? putO<Campaign>(`${W(ws)}/campaigns/${id}`, c) : post<Campaign>(`${W(ws)}/campaigns`, c)),
+  deleteCampaign: (ws: string, id: string) => del(`${W(ws)}/campaigns/${id}`),
+  planCampaign: (ws: string, id: string) => post<{ created: number }>(`${W(ws)}/campaigns/${id}/plan`, {}, { timeoutMs: 240_000 }),
+
   config: () => get<AppConfig>("/v1/app-config"),
   workspaces: () => get<{ workspaces: WorkspaceListItem[] }>("/v1/workspaces").then((r) => r.workspaces),
   createWorkspace: (name: string) =>

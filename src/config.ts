@@ -15,6 +15,10 @@ const Env = z.object({
   STUDIO_API_TOKEN: z.string().optional(),
   EMBED_URL: z.string().url().optional().or(z.literal("").transform(() => undefined)),
   EMBED_API_KEY: z.string().optional(),
+  /** Supabase Storage for uploaded originals (free tier). Server-only; never sent to the browser. */
+  SUPABASE_URL: z.string().url().optional().or(z.literal("").transform(() => undefined)),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  UPLOAD_BUCKET: z.string().default("ideation-uploads"),
   META_GRAPH_VERSION: z.string().default("v23.0"),
   LINKEDIN_VERSION: z.string().default("202509"),
   PORT: z.coerce.number().int().default(8787),

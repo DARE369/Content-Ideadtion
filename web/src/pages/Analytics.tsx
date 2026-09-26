@@ -180,7 +180,7 @@ function MatchInbox() {
       <p className="mt-1 text-sm text-ink-2">These posts were published outside the studio but look like a recent brief. Confirm so their results teach the engine.</p>
       <ul className="mt-4 flex flex-col gap-3">
         {matches.data.map((m) => (
-          <li key={m.id} className="grid gap-3 rounded-lg border border-line p-3 md:grid-cols-[1fr_1fr_auto] md:items-center">
+          <li key={m.id} className="grid gap-3 rounded-lg border border-line p-3 md:grid-cols-[minmax(0,1fr)_1fr_auto] md:items-center">
             <div className="min-w-0">
               <div className="flex items-center gap-2 text-xs text-ink-3"><PlatformBadge platform={m.platform} withName={false} size="sm" />Posted {relativeTime(m.published_at)}</div>
               <p className="mt-1 line-clamp-2 text-sm">{m.caption}</p>

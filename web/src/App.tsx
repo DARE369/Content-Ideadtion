@@ -5,6 +5,8 @@ import { AppShell } from "./layout/AppShell";
 import { useSummary, useWorkspace } from "./lib/workspace";
 import { BriefDetailPage } from "./pages/BriefDetail";
 import { Briefs } from "./pages/Briefs";
+import { KnowledgePage } from "./pages/Knowledge";
+import { PlanPage } from "./pages/Plan";
 import { Refine } from "./pages/Refine";
 import { ReportsPage } from "./pages/Reports";
 import { SettingsPage } from "./pages/Settings";
@@ -18,7 +20,7 @@ const PostDetailPage = lazy(() => import("./pages/PostDetail").then((m) => ({ de
 const pageFallback = <div className="space-y-4"><Skeleton className="h-8 w-48" /><Skeleton className="h-64" /></div>;
 
 const TITLES: [RegExp, string][] = [
-  [/^\/week/, "This week"], [/^\/refine/, "Refine my idea"], [/^\/briefs/, "Briefs"], [/^\/analytics/, "Analytics"],
+  [/^\/week/, "This week"], [/^\/plan/, "Plan"], [/^\/knowledge/, "Knowledge"], [/^\/refine/, "Refine my idea"], [/^\/briefs/, "Briefs"], [/^\/analytics/, "Analytics"],
   [/^\/reports/, "Reports"], [/^\/settings/, "Settings"], [/^\/setup/, "Set up"], [/^\/welcome/, "Welcome"],
 ];
 
@@ -53,6 +55,12 @@ export function App() {
       <Route path="/setup" element={workspaceId ? <Setup /> : <Navigate to="/welcome" replace />} />
       <Route element={<RequireReady><AppShell /></RequireReady>}>
         <Route path="/week" element={<ThisWeek />} />
+        <Route path="/plan" element={<PlanPage />} />
+        <Route path="/plan/:tab" element={<PlanPage />} />
+        <Route path="/plan/:tab/:id" element={<PlanPage />} />
+        <Route path="/knowledge" element={<KnowledgePage />} />
+        <Route path="/knowledge/:tab" element={<KnowledgePage />} />
+        <Route path="/knowledge/:tab/:id" element={<KnowledgePage />} />
         <Route path="/refine" element={<Refine />} />
         <Route path="/briefs" element={<Briefs />} />
         <Route path="/briefs/:id" element={<BriefDetailPage />} />
