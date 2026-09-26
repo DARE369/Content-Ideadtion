@@ -15,6 +15,9 @@ keyless public feeds and the studio's Supabase Postgres. There is no scraping an
 
 Every published post carries the `idea_id` and `brief_id` it came from. That link is what lets the loop learn.
 
+**Week 2 (in progress):** business knowledge from every site the brand owns, products, a growth plan, campaigns and
+platform optimisation in briefs. Full specification: [docs/WEEK2_SPEC.md](docs/WEEK2_SPEC.md).
+
 ## The web app
 
 `web/` is a React app (Vite, TypeScript, Tailwind, TanStack Query, Recharts). It's built into `public/` and served by
