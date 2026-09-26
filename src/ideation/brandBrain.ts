@@ -13,7 +13,7 @@ export async function draftBrandBrain(
   db: Db,
   workspaceId: string,
   input: { website_url: string; goal: Goal; language?: string | null },
-): Promise<BrandDraft> {
+): Promise<BrandDraft & { warnings: string[] }> {
   return researchBrand(db, workspaceId, input);
 }
 

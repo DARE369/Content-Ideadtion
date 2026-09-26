@@ -48,7 +48,12 @@ export interface CompetitorSuggestion {
 export interface BrandDraft {
   brain: BrandBrain; name: string; logos: string[]; competitor_suggestions: CompetitorSuggestion[];
   researched_with_web: boolean; site_reachable: boolean;
+  /** Plain-language notes on anything the analysis couldn't do. */
+  warnings?: string[];
 }
+
+export interface AnalyseInput { website_url: string; goal: Goal; language?: string | null }
+export interface AnalyseStage { ok: boolean; warning?: string }
 
 export interface Evidence { kind: "own_post" | "competitor_post" | "trend" | "comment" | "web"; id: string; url: string | null; summary: string }
 

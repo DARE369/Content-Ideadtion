@@ -87,6 +87,13 @@ export interface StructuredRequest<S extends z.ZodType> extends CallContext {
   content: Anthropic.MessageParam["content"];
   schema: S;
   maxTokens?: number;
+  /** Hard ceiling for the whole call, retries included. */
+  timeoutMs?: number;
+}
+
+/** SDK request options for a call that must finish within `timeoutMs`. */
+function limits(timeoutMs: number | undefined): Anthropic.RequestOptions | undefined {
+  return timeoutMs ? { signal: AbortSignal.timeout(timeoutMs), timeout: timeoutMs, maxRetries: 1 } : undefined;
 }
 
 export async function structured<S extends z.ZodType>(req: StructuredRequest<S>): Promise<z.infer<S>> {
@@ -101,7 +108,7 @@ export async function structured<S extends z.ZodType>(req: StructuredRequest<S>)
     messages: [{ role: "user", content: req.content }],
     output_config: { format: zodOutputFormat(req.schema), ...(effort ? { effort } : {}) },
     ...extra,
-  });
+  }, limits(req.timeoutMs));
   await logCost(req, model, res.usage, Date.now() - started);
   if (res.stop_reason === "refusal") throw new RefusalError(`${req.task}: model declined (${res.stop_details?.category ?? "unknown"})`);
   if (res.stop_reason === "max_tokens") throw new Error(`${req.task}: output truncated at max_tokens`);
@@ -142,7 +149,12 @@ export interface ResearchRequest extends CallContext {
   content: string;
   maxSearches?: number;
   maxFetches?: number;
+  /** Stop after this long and keep whatever was found so far. */
+  timeoutMs?: number;
+  maxTokens?: number;
 }
+
+export interface ResearchResult { text: string; searched: boolean; timedOut: boolean }
 
 /**
  * A research turn with Claude's server-side web search and web fetch. The
@@ -150,7 +162,7 @@ export interface ResearchRequest extends CallContext {
  * and it resumes. Falls back to no tools if the account has web tools disabled.
  * Returns the final text.
  */
-export async function research(req: ResearchRequest): Promise<{ text: string; searched: boolean }> {
+export async function research(req: ResearchRequest): Promise<ResearchResult> {
   await assertBudget(req);
   const model = modelFor("strategy");
   const { effort, ...extra } = tierParams(model, "strategy");
@@ -159,39 +171,56 @@ export async function research(req: ResearchRequest): Promise<{ text: string; se
     { type: legacy ? "web_search_20250305" : "web_search_20260209", name: "web_search", max_uses: req.maxSearches ?? 6 },
     { type: legacy ? "web_fetch_20250910" : "web_fetch_20260209", name: "web_fetch", max_uses: req.maxFetches ?? 4 },
   ] as unknown as Anthropic.ToolUnion[];
+  const deadline = Date.now() + (req.timeoutMs ?? 10 * 60_000);
 
-  const run = async (withTools: boolean) => {
+  const run = async (withTools: boolean): Promise<Omit<ResearchResult, "searched">> => {
     const messages: Anthropic.MessageParam[] = [{ role: "user", content: req.content }];
-    let last: Anthropic.Message | undefined;
+    // A resumed turn (pause_turn) returns only the new blocks, so keep every round's text.
+    const texts: string[] = [];
     for (let i = 0; i < 4; i++) {
+      const left = deadline - Date.now();
+      // Don't start a follow-up round that can't finish.
+      if (left < (i === 0 ? 1 : 5_000)) return { text: texts.join("\n").trim(), timedOut: true };
       const started = Date.now();
-      last = await anthropic().messages.create({
-        model,
-        max_tokens: 16000,
-        system: cachedSystem(req.system),
-        messages,
-        ...(withTools ? { tools } : {}),
-        ...(effort ? { output_config: { effort } } : {}),
-        ...extra,
-      });
+      let last: Anthropic.Message;
+      try {
+        last = await anthropic().messages.create({
+          model,
+          max_tokens: req.maxTokens ?? 8000,
+          system: cachedSystem(req.system),
+          messages,
+          ...(withTools ? { tools } : {}),
+          ...(effort ? { output_config: { effort } } : {}),
+          ...extra,
+        }, { signal: AbortSignal.timeout(left), timeout: left, maxRetries: 1 });
+      } catch (err) {
+        if (isTimeout(err)) return { text: texts.join("\n").trim(), timedOut: true };
+        throw err;
+      }
       const searches = last.usage.server_tool_use?.web_search_requests ?? 0;
       await logCost(req, model, last.usage, Date.now() - started, false, searches * 0.01);
+      if (last.stop_reason === "refusal") throw new RefusalError(`${req.task}: model declined`);
+      texts.push(...last.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text));
       if (last.stop_reason !== "pause_turn") break;
       messages.push({ role: "assistant", content: last.content });
     }
-    if (last?.stop_reason === "refusal") throw new RefusalError(`${req.task}: model declined`);
-    const text = (last?.content ?? []).filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("\n").trim();
-    return text;
+    return { text: texts.join("\n").trim(), timedOut: false };
   };
 
   try {
-    return { text: await run(true), searched: true };
+    return { ...(await run(true)), searched: true };
   } catch (err) {
     // Web tools can be disabled for an organisation; research from the website alone.
     if (err instanceof Anthropic.BadRequestError || err instanceof Anthropic.PermissionDeniedError) {
       console.warn(`[research] web tools unavailable (${err.message}); continuing without them`);
-      return { text: await run(false), searched: false };
+      return { ...(await run(false)), searched: false };
     }
     throw err;
   }
+}
+
+/** True for a call that ran out of time (our deadline or the SDK's own timeout). */
+export function isTimeout(err: unknown): boolean {
+  return err instanceof Anthropic.APIConnectionTimeoutError || err instanceof Anthropic.APIUserAbortError
+    || (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError"));
 }

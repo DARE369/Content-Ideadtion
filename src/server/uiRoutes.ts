@@ -8,7 +8,8 @@ import { shortlist } from "../ideation/cards.js";
 import { precomputeWorkspace } from "../ideation/precompute.js";
 import { enqueue } from "../jobs/queue.js";
 import { probBeatsBaseline } from "../learning/model.js";
-import { addSuggestedCompetitors, MAX_COMPETITORS, researchCompetitors, type CompetitorSuggestion } from "../research/brand.js";
+import { isTimeout } from "../ai/client.js";
+import { addSuggestedCompetitors, CompetitorResearchError, MAX_COMPETITORS, researchCompetitors, type CompetitorSuggestion } from "../research/brand.js";
 
 /**
  * Read models and actions the web app needs on top of the studio API.
@@ -35,7 +36,13 @@ export function registerUiRoutes(app: Hono, db: Db): void {
 
   app.post("/v1/workspaces/:ws/competitor-suggestions/refresh", async (c) => {
     if (!config().ANTHROPIC_API_KEY) throw new HTTPException(503, { message: "Competitor research needs ANTHROPIC_API_KEY on the server." });
-    return c.json({ suggestions: await researchCompetitors(db, c.req.param("ws")) });
+    try {
+      return c.json({ suggestions: await researchCompetitors(db, c.req.param("ws")) });
+    } catch (err) {
+      if (err instanceof CompetitorResearchError) throw new HTTPException(503, { message: err.message });
+      if (isTimeout(err)) throw new HTTPException(503, { message: "Competitor research took too long this time. Try again in a minute, or add competitors yourself." });
+      throw err;
+    }
   });
 
   /** Track chosen suggestions ({names}) or let the AI pick the strongest ({auto: true}), up to the limit. */

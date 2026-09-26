@@ -12,6 +12,7 @@ import { BrandBrain } from "../contracts/brandBrain.js";
 import type { Brief } from "../contracts/brief.js";
 import { autopilot, handOff } from "../handoff/briefs.js";
 import { confirmBrandBrain, draftBrandBrain } from "../ideation/brandBrain.js";
+import { analyseFinish, analyseResearch, analyseSite } from "../research/brand.js";
 import { ideaCard, shortlist } from "../ideation/cards.js";
 import { connectedPlatforms } from "../ideation/context.js";
 import { exportBrief, exportIdeas, type ExportFormat } from "../ideation/export.js";
@@ -141,9 +142,24 @@ export function createApp(db: Db): Hono {
     return c.body(null, 204);
   });
 
+  const AnalyseBody = z.object({ website_url: z.string().url(), goal: z.enum(GOALS), language: z.string().min(2).nullable().optional() });
+
+  /** All stages in one request. Can outlast short function limits; the web app uses the staged routes below. */
   app.post("/v1/workspaces/:ws/brand-brain/draft", async (c) => {
-    const b = await body(c, z.object({ website_url: z.string().url(), goal: z.enum(GOALS), language: z.string().min(2).nullable().optional() }));
+    const b = await body(c, AnalyseBody);
     return c.json(await draftBrandBrain(db, c.req.param("ws"), b));
+  });
+
+  // Website analysis in three requests, so each stays inside the hosting time limit
+  // and a failed stage degrades the draft instead of losing it.
+  app.post("/v1/workspaces/:ws/brand-brain/analyse/site", async (c) => {
+    return c.json(await analyseSite(db, c.req.param("ws"), await body(c, AnalyseBody)));
+  });
+  app.post("/v1/workspaces/:ws/brand-brain/analyse/research", async (c) => {
+    return c.json(await analyseResearch(db, c.req.param("ws"), await body(c, AnalyseBody)));
+  });
+  app.post("/v1/workspaces/:ws/brand-brain/analyse/finish", async (c) => {
+    return c.json(await analyseFinish(db, c.req.param("ws"), await body(c, AnalyseBody)));
   });
 
   app.put("/v1/workspaces/:ws/brand-brain", async (c) => {

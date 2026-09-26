@@ -85,6 +85,8 @@ export interface RequestOptions {
   fetchImpl?: typeof fetch;
   /** Abort a single attempt after this long. */
   timeoutMs?: number;
+  /** Give up rather than wait longer than this between retries. */
+  maxBackoffMs?: number;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -108,12 +110,13 @@ async function request(url: string, opts: RequestOptions): Promise<Response> {
     const retryable = res.status === 429 || res.status >= 500;
     if (!retryable) return res;
     const retryAfter = Number(res.headers.get("retry-after")) * 1000 || 0;
-    if (attempt >= maxRetries) {
+    const backoff = Math.max(retryAfter, 2 ** attempt * 1_000 * (0.75 + Math.random() / 2));
+    if (attempt >= maxRetries || backoff > (opts.maxBackoffMs ?? Infinity)) {
       if (res.status === 429) throw new RateLimitedError(key, Math.max(retryAfter, 60_000));
       throw new HttpError(res.status, url, await res.text());
     }
     // Exponential backoff with jitter: 1s, 2s, 4s ... (or the server's retry-after).
-    await sleep(Math.max(retryAfter, 2 ** attempt * 1_000 * (0.75 + Math.random() / 2)));
+    await sleep(backoff);
   }
 }
 

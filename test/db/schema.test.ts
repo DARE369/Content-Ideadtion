@@ -2,7 +2,9 @@ import { readFileSync } from "node:fs";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { ensureSchema, resetSchemaState } from "../../src/schema.js";
-import { addSuggestedCompetitors, MAX_COMPETITORS } from "../../src/research/brand.js";
+import type Anthropic from "@anthropic-ai/sdk";
+import { setAnthropic } from "../../src/ai/client.js";
+import { addSuggestedCompetitors, analyseFinish, analyseResearch, analyseSite, BUDGET, MAX_COMPETITORS } from "../../src/research/brand.js";
 
 const admin = process.env.TEST_DATABASE_URL!;
 const created: string[] = [];
@@ -68,6 +70,42 @@ describe("automatic migrations", () => {
     expect(auto.added).toEqual(["A Co", "C Co"]);
     expect(auto.skipped.length).toBeGreaterThan(0);
     expect((await pool.query("select count(*)::int as n from competitors where workspace_id = 'wsp_c'")).rows[0].n).toBe(MAX_COMPETITORS);
+    await pool.end();
+  });
+
+  it("website analysis degrades step by step instead of hanging", async () => {
+    const pool = await newDb();
+    resetSchemaState();
+    await ensureSchema(pool);
+    await pool.query("insert into workspaces (id, studio_workspace_id, name) values ('wsp_a', 's', 'A')");
+    Object.assign(BUDGET, { crawl: 3_000, research: 300, structure: 200, structureFallback: 200 });
+    // An AI that never answers until the caller gives up.
+    const hang = (_: unknown, opts?: { signal?: AbortSignal }) => new Promise((_r, reject) => {
+      opts?.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
+    });
+    setAnthropic({ messages: { create: hang, parse: hang } } as unknown as Anthropic);
+    const input = { website_url: "http://127.0.0.1:9/", goal: "leads" as const, language: null };
+
+    const started = Date.now();
+    const site = await analyseSite(pool, "wsp_a", input);
+    expect(site.ok).toBe(false);
+    expect(site.warning).toMatch(/couldn't open your website/);
+    const research = await analyseResearch(pool, "wsp_a", input);
+    expect(research.ok).toBe(false);
+    expect(research.warning).toMatch(/ran out of time/);
+    const draft = await analyseFinish(pool, "wsp_a", input);
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(draft.brain.website_url).toBe(input.website_url);
+    expect(draft.warnings[0]).toMatch(/couldn't build your profile/);
+    expect(draft.name).toBe("127.0.0.1");
+    const saved = (await pool.query("select draft from brand_brains where workspace_id = 'wsp_a'")).rows[0].draft;
+    expect(saved.website_url).toBe(input.website_url);
+
+    // An AI that errors outright: still a draft, with a plain-language reason.
+    const fail = async () => { throw Object.assign(new Error("overloaded"), { status: 429 }); };
+    setAnthropic({ messages: { create: fail, parse: fail } } as unknown as Anthropic);
+    expect((await analyseResearch(pool, "wsp_a", input)).warning).toMatch(/AI service is busy/);
+    expect((await analyseFinish(pool, "wsp_a", input)).warnings).toHaveLength(1);
     await pool.end();
   });
 });

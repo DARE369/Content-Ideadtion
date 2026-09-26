@@ -1,19 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Sparkles, Unplug } from "lucide-react";
+import { Info, Plus, Sparkles, Unplug } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { PlatformBadge } from "../components/bits";
 import { BrandBrainForm, brainProblems, cleanBrain } from "../components/BrandBrainForm";
 import { CompetitorsEditor } from "../components/CompetitorsEditor";
 import { CompetitorPicker } from "../components/CompetitorPicker";
-import { NarratedProgress } from "../components/Progress";
-import { ANALYSIS_STEPS, toFormBrain } from "./Setup";
+import { WebsiteAnalysis } from "../components/WebsiteAnalysis";
+import { toFormBrain } from "./Setup";
 import { Dialog } from "../components/Dialog";
 import { useToast } from "../components/Toast";
 import { Button, Card, EmptyState, ErrorNote, Field, inputClass, PageHeader, Skeleton } from "../components/ui";
 import { api } from "../lib/api";
 import { ALL_PLATFORMS, num, PLATFORM_META, relativeTime } from "../lib/format";
-import type { Account, BrandBrain, Platform } from "../lib/types";
+import type { Account, AnalyseInput, BrandBrain, Platform } from "../lib/types";
 import { useAppConfig, useSummary, useWorkspace, useWs } from "../lib/workspace";
 
 const TABS = [
@@ -73,33 +73,45 @@ function BrandTab() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["ws", ws] }); qc.invalidateQueries({ queryKey: ["workspaces"] }); toast({ tone: "success", message: "Saved. The next ideas will use the changes." }); },
     onError: (e) => toast({ tone: "error", message: e.message }),
   });
-  const reanalyze = useMutation({
-    mutationFn: () => api.draftBrain(ws, { website_url: value!.website_url!, goal: value!.goal, language: value!.language }),
-    onSuccess: (d) => {
-      setValue(toFormBrain({ ...d.brain, goal: value!.goal, language: value!.language, banned_topics: value!.banned_topics.length ? value!.banned_topics : d.brain.banned_topics }));
-      if (d.name) setName(d.name);
-      setLogos(d.logos);
-      qc.invalidateQueries({ queryKey: ["ws", ws, "competitor-suggestions"] });
-      toast({ tone: "success", message: "Updated from your website. Review it, then press Save." });
-    },
-    onError: (e) => toast({ tone: "error", message: e.message }),
-  });
+  const [analysing, setAnalysing] = useState<AnalyseInput | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   if (brain.isLoading || !value) return brain.isError ? <ErrorNote error={brain.error} /> : <Skeleton className="h-96" />;
   const problems = brainProblems(value);
   const canAnalyze = !!cfg.data?.ai_configured && !!value.website_url && /^https?:\/\/\S+\.\S+/.test(value.website_url);
   return (
     <Card className="p-5 sm:p-6">
-      {reanalyze.isPending ? (
-        <div className="py-2">
-          <h2 className="mb-4 text-base font-semibold">Re-analysing {value.website_url}…</h2>
-          <NarratedProgress intervalMs={11000} steps={ANALYSIS_STEPS} />
-        </div>
+      {analysing ? (
+        <WebsiteAnalysis
+          ws={ws}
+          input={analysing}
+          title={`Re-analysing ${analysing.website_url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}…`}
+          onDone={({ draft: d, warnings: w }) => {
+            setAnalysing(null);
+            setValue(toFormBrain({ ...d.brain, goal: value.goal, language: value.language, banned_topics: value.banned_topics.length ? value.banned_topics : d.brain.banned_topics }));
+            if (d.name) setName(d.name);
+            setLogos(d.logos);
+            setWarnings(w);
+            qc.invalidateQueries({ queryKey: ["ws", ws, "competitor-suggestions"] });
+            toast({ tone: "success", message: "Updated from your website. Review it, then press Save." });
+          }}
+          onCancel={() => setAnalysing(null)}
+          onManual={() => setAnalysing(null)}
+        />
       ) : (
         <form onSubmit={(e) => { e.preventDefault(); if (!problems.length) save.mutate(cleanBrain(value)); }}>
           {canAnalyze && (
             <div className="mb-6 flex flex-col gap-3 rounded-xl bg-surface-2 p-4 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-ink-2">Something off? Re-read your website and research your business again. You'll review the result before anything is saved.</p>
-              <Button type="button" icon={<Sparkles className="size-4" />} onClick={() => reanalyze.mutate()}>Re-analyse my website</Button>
+              <Button type="button" icon={<Sparkles className="size-4" />} onClick={() => { setWarnings([]); setAnalysing({ website_url: value.website_url!, goal: value.goal, language: value.language }); }}>Re-analyse my website</Button>
+            </div>
+          )}
+          {warnings.length > 0 && (
+            <div className="mb-6 flex gap-2 rounded-lg bg-test-soft px-3 py-2 text-sm text-test">
+              <Info className="mt-0.5 size-4 shrink-0" aria-hidden />
+              <div>
+                <p className="font-medium">Some parts need your help</p>
+                <ul className="mt-1 list-inside list-disc">{warnings.map((w) => <li key={w}>{w}</li>)}</ul>
+              </div>
             </div>
           )}
           <BrandBrainForm value={value} onChange={setValue} name={name} onNameChange={setName} logos={logos} />

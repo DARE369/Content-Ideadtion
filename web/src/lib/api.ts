@@ -1,5 +1,5 @@
 import type {
-  Account, AppConfig, BrandBrain, BrandBrainRow, BrandDraft, CompetitorSuggestion, BriefDetail, BriefListItem, BriefPayload, Competitor, CostRow, IdeaCard,
+  Account, AnalyseInput, AnalyseStage, AppConfig, BrandBrain, BrandBrainRow, BrandDraft, CompetitorSuggestion, BriefDetail, BriefListItem, BriefPayload, Competitor, CostRow, IdeaCard,
   Learning, Match, Overview, Platform, PostDetail, PostRow, ReportDetail, ReportListItem, Summary, WorkspaceListItem,
 } from "./types";
 
@@ -9,15 +9,39 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+export interface RequestOpts {
+  /** Cancels the request (the user pressed Cancel). */
+  signal?: AbortSignal;
+  /** Give up after this long; throws ApiError with status 408. */
+  timeoutMs?: number;
+}
+
+function anySignal(signals: AbortSignal[]): AbortSignal {
+  if (typeof AbortSignal.any === "function") return AbortSignal.any(signals);
+  const c = new AbortController();
+  for (const s of signals) {
+    if (s.aborted) c.abort(s.reason);
+    else s.addEventListener("abort", () => c.abort(s.reason), { once: true });
+  }
+  return c.signal;
+}
+
+/** True when the user cancelled, as opposed to a timeout or a server error. */
+export const isCancelled = (e: unknown) => e instanceof DOMException && e.name === "AbortError";
+
+async function request<T>(method: string, path: string, body?: unknown, opts: RequestOpts = {}): Promise<T> {
   let res: Response;
+  const signals = [opts.signal, opts.timeoutMs ? AbortSignal.timeout(opts.timeoutMs) : undefined].filter((s): s is AbortSignal => !!s);
   try {
     res = await fetch(path, {
       method,
       headers: body === undefined ? {} : { "content-type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
+      ...(signals.length ? { signal: anySignal(signals) } : {}),
     });
-  } catch {
+  } catch (e) {
+    if (opts.signal?.aborted) throw new DOMException("Cancelled", "AbortError");
+    if (e instanceof DOMException && e.name === "TimeoutError") throw new ApiError(408, "The server took too long to answer.");
     throw new ApiError(0, "Can't reach the server. Check your connection and try again.");
   }
   if (res.status === 204) return undefined as T;
@@ -38,6 +62,7 @@ function safeJson(t: string): unknown {
 function friendlyError(status: number, data: unknown): string {
   const msg = typeof data === "object" && data && "error" in data ? String((data as { error: string }).error) : "";
   if (status === 401) return "This server needs an access token. Set AUTH_MODE=open for the web app while sign-in isn't built.";
+  if (status === 504) return "The server ran out of time on this step.";
   if (status === 429) return msg || "Today's AI budget for this workspace is used up. It resets at midnight UTC.";
   if (status === 400 && typeof data === "object" && data && "issues" in data) {
     const issues = (data as { issues: { path: (string | number)[]; message: string }[] }).issues;
@@ -49,7 +74,7 @@ function friendlyError(status: number, data: unknown): string {
 }
 
 const get = <T,>(p: string) => request<T>("GET", p);
-const post = <T,>(p: string, b?: unknown) => request<T>("POST", p, b ?? {});
+const post = <T,>(p: string, b?: unknown, o?: RequestOpts) => request<T>("POST", p, b ?? {}, o);
 const put = <T,>(p: string, b: unknown) => request<T>("PUT", p, b);
 const patch = <T,>(p: string, b: unknown) => request<T>("PATCH", p, b);
 const del = <T,>(p: string) => request<T>("DELETE", p);
@@ -65,7 +90,9 @@ export const api = {
   summary: (ws: string) => get<Summary>(`/v1/workspaces/${ws}/summary`),
 
   brain: (ws: string) => get<BrandBrainRow>(`/v1/workspaces/${ws}/brand-brain`),
-  draftBrain: (ws: string, b: { website_url: string; goal: string; language?: string | null }) => post<BrandDraft>(`/v1/workspaces/${ws}/brand-brain/draft`, b),
+  analyseSite: (ws: string, b: AnalyseInput, o?: RequestOpts) => post<AnalyseStage & { name: string | null; logos: string[]; pages: number }>(`/v1/workspaces/${ws}/brand-brain/analyse/site`, b, o),
+  analyseResearch: (ws: string, b: AnalyseInput, o?: RequestOpts) => post<AnalyseStage & { searched: boolean }>(`/v1/workspaces/${ws}/brand-brain/analyse/research`, b, o),
+  analyseFinish: (ws: string, b: AnalyseInput, o?: RequestOpts) => post<BrandDraft & { warnings: string[] }>(`/v1/workspaces/${ws}/brand-brain/analyse/finish`, b, o),
   confirmBrain: (ws: string, b: BrandBrain) => put(`/v1/workspaces/${ws}/brand-brain`, b),
 
   competitors: (ws: string) => get<Competitor[]>(`/v1/workspaces/${ws}/competitors`),
@@ -73,7 +100,7 @@ export const api = {
   removeCompetitor: (ws: string, id: string) => del(`/v1/workspaces/${ws}/competitors/${id}`),
   competitorSuggestions: (ws: string) =>
     get<{ suggestions: CompetitorSuggestion[]; tracked: number; limit: number }>(`/v1/workspaces/${ws}/competitor-suggestions`),
-  refreshCompetitorSuggestions: (ws: string) => post<{ suggestions: CompetitorSuggestion[] }>(`/v1/workspaces/${ws}/competitor-suggestions/refresh`),
+  refreshCompetitorSuggestions: (ws: string) => post<{ suggestions: CompetitorSuggestion[] }>(`/v1/workspaces/${ws}/competitor-suggestions/refresh`, {}, { timeoutMs: 180_000 }),
   selectCompetitors: (ws: string, pick: { names?: string[]; auto?: boolean }) =>
     post<{ added: string[]; skipped: string[]; limit: number }>(`/v1/workspaces/${ws}/competitors/select`, pick),
 
@@ -83,7 +110,7 @@ export const api = {
   disconnect: (id: string) => del<{ deleted: { posts: number; comments: number } }>(`/v1/accounts/${id}`),
 
   ideas: (ws: string) => get<{ ideas: IdeaCard[] }>(`/v1/workspaces/${ws}/ideas?limit=10`).then((r) => r.ideas),
-  generateIdeas: (ws: string) => post<{ ideas: IdeaCard[] }>(`/v1/workspaces/${ws}/ideas/generate`),
+  generateIdeas: (ws: string) => post<{ ideas: IdeaCard[] }>(`/v1/workspaces/${ws}/ideas/generate`, {}, { timeoutMs: 300_000 }),
   idea: (id: string) => get<IdeaCard>(`/v1/ideas/${id}`),
   dismissIdea: (id: string) => post(`/v1/ideas/${id}/dismiss`),
   handoff: (id: string, platforms: Platform[]) => post<{ briefs: BriefPayload[] }>(`/v1/ideas/${id}/handoff`, { platforms }),

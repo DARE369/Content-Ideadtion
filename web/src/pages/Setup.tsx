@@ -7,9 +7,10 @@ import { CompetitorPicker } from "../components/CompetitorPicker";
 import { CompetitorsEditor } from "../components/CompetitorsEditor";
 import { NarratedProgress } from "../components/Progress";
 import { useToast } from "../components/Toast";
+import { WebsiteAnalysis } from "../components/WebsiteAnalysis";
 import { Button, Card, ErrorNote, Field, inputClass, Skeleton } from "../components/ui";
 import { api } from "../lib/api";
-import type { BrandBrain, BrandDraft, Goal } from "../lib/types";
+import type { AnalyseInput, BrandBrain, BrandDraft, Goal } from "../lib/types";
 import { useAppConfig, useSummary, useWs } from "../lib/workspace";
 
 const STEPS = ["Your website", "Your brand", "Competitors", "First ideas"];
@@ -18,16 +19,6 @@ export const EMPTY_BRAIN: BrandBrain = {
   website_url: null, brand_kit: { colors: [], fonts: [] }, social_links: [], goal: "engagement", language: "en-GB",
   tone_words: [], pillars: [], audience: "", offers: [], banned_topics: [],
 };
-
-export const ANALYSIS_STEPS = [
-  "Scanning your website",
-  "Extracting your logo and colours",
-  "Finding your social profiles",
-  "Researching what you sell and what earns the money",
-  "Working out who buys from you",
-  "Finding competitors in your market",
-  "Preparing your brand",
-];
 
 /** Fill any gaps so older drafts and partial research still render in the form. */
 export function toFormBrain(b: Partial<BrandBrain> | null | undefined): BrandBrain {
@@ -79,7 +70,6 @@ function BasicsStep({ onDone }: { onDone: () => void }) {
   const ws = useWs();
   const cfg = useAppConfig();
   const qc = useQueryClient();
-  const toast = useToast();
   const [url, setUrl] = useState("");
   const [goal, setGoal] = useState<Goal>("engagement");
   const [language, setLanguage] = useState("");
@@ -87,11 +77,7 @@ function BasicsStep({ onDone }: { onDone: () => void }) {
   const validUrl = /^https?:\/\/\S+\.\S+/.test(url.trim()) || /^[\w-]+(\.[\w-]+)+/.test(url.trim());
   const normalized = url.trim() ? (url.trim().startsWith("http") ? url.trim() : `https://${url.trim()}`) : null;
 
-  const analyze = useMutation({
-    mutationFn: () => api.draftBrain(ws, { website_url: normalized!, goal, language: language || null }),
-    onSuccess: (d) => { qc.setQueryData(["ws", ws, "draft"], d); qc.invalidateQueries({ queryKey: ["ws", ws, "competitor-suggestions"] }); onDone(); },
-    onError: (e) => toast({ tone: "error", message: `Couldn't analyse the website: ${e.message} You can set it up manually instead.` }),
-  });
+  const [running, setRunning] = useState<AnalyseInput | null>(null);
 
   const manual = () => {
     qc.setQueryData<BrandDraft>(["ws", ws, "draft"], {
@@ -101,13 +87,21 @@ function BasicsStep({ onDone }: { onDone: () => void }) {
     onDone();
   };
 
-  if (analyze.isPending) {
+  if (running) {
     return (
       <Card className="p-6 sm:p-8">
-        <div className="grid size-11 place-items-center rounded-xl bg-accent-soft text-accent"><Sparkles className="size-5" aria-hidden /></div>
-        <h1 className="mt-4 text-xl font-semibold">Analysing your brand…</h1>
-        <p className="mt-1 text-sm text-ink-2">We're reading your website and researching your business on the web. Usually 1–2 minutes; keep this tab open.</p>
-        <div className="mt-6"><NarratedProgress intervalMs={11000} steps={ANALYSIS_STEPS} /></div>
+        <WebsiteAnalysis
+          ws={ws}
+          input={running}
+          onDone={({ draft }) => {
+            qc.setQueryData(["ws", ws, "draft"], draft);
+            qc.invalidateQueries({ queryKey: ["ws", ws, "competitor-suggestions"] });
+            qc.invalidateQueries({ queryKey: ["ws", ws, "summary"] });
+            onDone();
+          }}
+          onCancel={() => setRunning(null)}
+          onManual={() => { setRunning(null); manual(); }}
+        />
       </Card>
     );
   }
@@ -116,7 +110,7 @@ function BasicsStep({ onDone }: { onDone: () => void }) {
     <Card className="p-6 sm:p-8">
       <h1 className="text-xl font-semibold">Let's understand your brand</h1>
       <p className="mt-1 text-sm text-ink-2">Enter your website and we'll build your brand profile: what you sell, who buys, your logo, colours, socials and competitors. You review everything before it's used.</p>
-      <form className="mt-6 flex flex-col gap-6" onSubmit={(e) => { e.preventDefault(); if (aiReady && validUrl) analyze.mutate(); else manual(); }}>
+      <form className="mt-6 flex flex-col gap-6" onSubmit={(e) => { e.preventDefault(); if (aiReady && validUrl) setRunning({ website_url: normalized!, goal, language: language || null }); else manual(); }}>
         <Field label="Website" htmlFor="site">
           <input id="site" className={inputClass} inputMode="url" autoComplete="url" placeholder="yourcompany.com" value={url} onChange={(e) => setUrl(e.target.value)} />
         </Field>
@@ -192,12 +186,20 @@ function ReviewStep({ existing, loading, onBack, onDone }: {
           <p className="mt-1 text-sm text-ink-2">Review every part before continuing. Every idea and brief is built on this, and you can change it any time in Settings.</p>
         </div>
       </div>
-      {fresh && !fresh.site_reachable && (
+      {fresh?.warnings?.length ? (
+        <div className="mt-4 flex gap-2 rounded-lg bg-test-soft px-3 py-2 text-sm text-test">
+          <Info className="mt-0.5 size-4 shrink-0" aria-hidden />
+          <div>
+            <p className="font-medium">Some parts need your help</p>
+            <ul className="mt-1 list-inside list-disc">{fresh.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
+          </div>
+        </div>
+      ) : fresh && !fresh.site_reachable && fresh.researched_with_web ? (
         <p className="mt-4 flex gap-2 rounded-lg bg-test-soft px-3 py-2 text-sm text-test">
           <Info className="mt-0.5 size-4 shrink-0" aria-hidden />
           Your website couldn't be read directly, so this came from web research. Check it closely.
         </p>
-      )}
+      ) : null}
       <form className="mt-6" onSubmit={(e) => { e.preventDefault(); setShowErrors(true); if (!problems.length) save.mutate(cleanBrain(brain)); }}>
         <BrandBrainForm value={brain} onChange={setBrain} name={name} onNameChange={setName} logos={logos} />
         {showErrors && problems.length > 0 && (

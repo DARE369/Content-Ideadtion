@@ -41,7 +41,6 @@ export function CompetitorPicker({ ws, onChanged }: { ws: string; onChanged?: ()
   const research = useMutation({
     mutationFn: () => api.refreshCompetitorSuggestions(ws),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ws", ws, "competitor-suggestions"] }),
-    onError: (e) => toast({ tone: "error", message: e.message }),
   });
 
   if (q.isLoading) return <div className="space-y-2"><Skeleton className="h-20" /><Skeleton className="h-20" /></div>;
@@ -65,7 +64,7 @@ export function CompetitorPicker({ ws, onChanged }: { ws: string; onChanged?: ()
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-ink-2" aria-live="polite">
           {suggestions.length === 0
-            ? "No suggestions yet."
+            ? cfg.data?.ai_configured ? "No suggestions yet. Let us search your market, or add competitors yourself." : "Add the competitors you know below."
             : slots === 0
               ? `You're tracking ${tracked} of ${limit}. Remove one to add another.`
               : <>Pick up to <span className="font-semibold text-ink">{slots}</span> more · <span className="font-semibold text-ink">{picked.length}</span> selected</>}
@@ -99,7 +98,7 @@ export function CompetitorPicker({ ws, onChanged }: { ws: string; onChanged?: ()
           </Button>
         </div>
       )}
-      {research.isError && <ErrorNote error={research.error} />}
+      {research.isError && <ErrorNote error={research.error} onRetry={() => research.mutate()} />}
     </div>
   );
 }

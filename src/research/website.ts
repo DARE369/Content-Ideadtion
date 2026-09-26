@@ -289,9 +289,11 @@ export interface SiteProfile {
   pages: { url: string; title: string | null; text: string }[];
 }
 
-async function get(url: string): Promise<string> {
-  return fetchText(url, { headers: { "user-agent": BROWSER_UA, accept: "text/html,*/*" }, limitKey: "websites", maxRetries: 1, timeoutMs: 12_000 });
+async function get(url: string, timeoutMs = 12_000, maxRetries = 1): Promise<string> {
+  return fetchText(url, { headers: { "user-agent": BROWSER_UA, accept: "text/html,*/*" }, limitKey: "websites", maxRetries, timeoutMs, maxBackoffMs: 3_000 });
 }
+
+/** Worst case about 35 s: the homepage (one retry), then sub-pages and stylesheets together. */
 
 export async function crawlSite(url: string): Promise<SiteProfile> {
   const empty: SiteProfile = { url, reachable: false, name: null, description: null, logos: [], socials: [], cssColors: [], themeColor: null, language: null, country: null, pages: [] };
@@ -302,17 +304,21 @@ export async function crawlSite(url: string): Promise<SiteProfile> {
     return { ...empty, ...guessLocale(null, url) };
   }
   const subUrls = pickSubpages(home);
-  const subs = (await Promise.all(subUrls.map(async (u) => {
-    try {
-      return extractPage(await get(u), u);
-    } catch {
-      return null;
-    }
-  }))).filter((x): x is PageExtract => !!x);
   // Up to two same-site stylesheets for brand colours.
   const host = new URL(url).hostname.replace(/^www\./, "");
   const sheets = home.stylesheets.filter((s) => new URL(s).hostname.replace(/^www\./, "").endsWith(host)).slice(0, 2);
-  const css = (await Promise.all(sheets.map((s) => get(s).then((t) => t.slice(0, 400_000)).catch(() => "")))).join("\n");
+  const [subPages, sheetTexts] = await Promise.all([
+    Promise.all(subUrls.map(async (u) => {
+      try {
+        return extractPage(await get(u, 8_000, 0), u);
+      } catch {
+        return null;
+      }
+    })),
+    Promise.all(sheets.map((s) => get(s, 8_000, 0).then((t) => t.slice(0, 400_000)).catch(() => ""))),
+  ]);
+  const subs = subPages.filter((x): x is PageExtract => !!x);
+  const css = sheetTexts.join("\n");
   const cssColors = brandColorsFrom([...(home.themeColor ? [home.themeColor, home.themeColor, home.themeColor] : []), ...home.inlineColors, ...colorsInCss(css)]);
   const all = [home, ...subs];
   const name = home.siteName ?? home.jsonLdNames[0] ?? home.title?.split(/\s[|\-–—:]\s/)[0]?.trim() ?? null;

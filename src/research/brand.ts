@@ -4,7 +4,7 @@ import type { Db } from "../db.js";
 import { research, structured } from "../ai/client.js";
 import { REVENUE_ROLES, SOCIAL_PLATFORMS, type BrandBrain, type Offer, type SocialLink } from "../contracts/brandBrain.js";
 import type { Goal, Platform } from "../types.js";
-import { crawlSite, dedupeSocials, normalizeColor, socialFromUrl, type SiteProfile } from "./website.js";
+import { crawlSite, dedupeSocials, guessLocale, normalizeColor, socialFromUrl, type SiteProfile } from "./website.js";
 
 /**
  * Brand research: read the website, research the company on the web, work out
@@ -170,49 +170,160 @@ export function mergeProfile(site: SiteProfile, p: Profile, input: { website_url
   return { brain, name: clean(p.name) || site.name || ownHost, logos: site.logos, competitor_suggestions: competitors };
 }
 
-async function structure(db: Db, workspaceId: string, notes: string, site: SiteProfile, withLogo: boolean): Promise<Profile> {
-  return structured({
-    db, task: "brand_brain:structure", workspaceId, tier: "strategy",
-    system: [STRUCTURE_ROLE],
-    content: [
-      ...(withLogo ? logoBlock(site) : []),
-      { type: "text", text: `Research notes:\n${notes || "(none)"}\n\nWebsite metadata:\n${siteBlock({ ...site, pages: [] })}` },
-    ],
-    schema: Profile,
-  });
+/** Time budgets (ms). Each stage is its own HTTP request, so each fits a 60 s function limit except research. */
+export const BUDGET = { crawl: 40_000, research: 100_000, structure: 38_000, structureFallback: 14_000, competitors: 100_000, competitorsStructure: 30_000 };
+
+export interface AnalyseInput { website_url: string; goal: Goal; language?: string | null }
+
+/** What one analysis stage reports back; `warning` is plain language for the user. */
+export interface StageResult { ok: boolean; warning?: string }
+
+interface StoredResearch { site?: SiteProfile; notes?: string; searched?: boolean; timed_out?: boolean; error?: string; at?: string }
+
+const USER_AGENT_BLOCKED = "We couldn't open your website. It may be slow, offline, or blocking automated visitors.";
+
+function emptySite(url: string): SiteProfile {
+  return { url, reachable: false, name: null, description: null, logos: [], socials: [], cssColors: [], themeColor: null, language: null, country: null, pages: [] };
 }
 
-export async function researchBrand(
-  db: Db, workspaceId: string, input: { website_url: string; goal: Goal; language?: string | null },
-): Promise<BrandDraft> {
-  const site = await crawlSite(input.website_url);
-  const notes = await research({
-    db, task: "brand_brain:research", workspaceId,
-    system: [RESEARCH_ROLE],
-    content: `${siteBlock(site)}\n\nResearch this company: ${input.website_url}`,
-  });
-  let profile: Profile;
+async function loadResearch(db: Db, workspaceId: string): Promise<StoredResearch> {
+  const r = await db.query<{ research: StoredResearch | null }>("select research from brand_brains where workspace_id = $1", [workspaceId]);
+  return r.rows[0]?.research ?? {};
+}
+
+async function saveResearch(db: Db, workspaceId: string, input: AnalyseInput, patch: StoredResearch, replace = false): Promise<void> {
+  await db.query(
+    `insert into brand_brains (workspace_id, website_url, goal, language, research) values ($1,$2,$3,$4,$5)
+     on conflict (workspace_id) do update set research = ${replace ? "excluded.research" : "coalesce(brand_brains.research, '{}'::jsonb) || excluded.research"}, updated_at = now()`,
+    [workspaceId, input.website_url, input.goal, input.language || "en", JSON.stringify(patch)],
+  );
+}
+
+/** Stage 1: read the website (no AI). Starts a fresh analysis. */
+export async function analyseSite(db: Db, workspaceId: string, input: AnalyseInput): Promise<StageResult & { name: string | null; logos: string[]; pages: number }> {
+  let site: SiteProfile;
   try {
-    profile = await structure(db, workspaceId, notes.text, site, true);
+    site = await withDeadline(crawlSite(input.website_url), BUDGET.crawl);
   } catch {
-    // The logo URL can be unreachable for the API; retry without the image.
-    profile = await structure(db, workspaceId, notes.text, site, false);
+    site = { ...emptySite(input.website_url), ...guessLocale(null, input.website_url) };
+  }
+  await saveResearch(db, workspaceId, input, { site, at: new Date().toISOString() }, true);
+  return {
+    ok: site.reachable, name: site.name, logos: site.logos, pages: site.pages.length,
+    ...(site.reachable ? {} : { warning: `${USER_AGENT_BLOCKED} We'll research your business on the web instead.` }),
+  };
+}
+
+/** Stage 2: research on the web. Never throws for AI problems; the draft falls back to the website alone. */
+export async function analyseResearch(db: Db, workspaceId: string, input: AnalyseInput): Promise<StageResult & { searched: boolean }> {
+  const site = (await loadResearch(db, workspaceId)).site ?? emptySite(input.website_url);
+  try {
+    const notes = await research({
+      db, task: "brand_brain:research", workspaceId,
+      system: [RESEARCH_ROLE],
+      content: `${siteBlock(site)}\n\nResearch this company: ${input.website_url}`,
+      timeoutMs: BUDGET.research,
+    });
+    await saveResearch(db, workspaceId, input, { notes: notes.text, searched: notes.searched, timed_out: notes.timedOut });
+    if (!notes.text) {
+      return { ok: false, searched: notes.searched, warning: "Web research ran out of time before finding anything, so your draft is based on your website." };
+    }
+    return {
+      ok: true, searched: notes.searched,
+      ...(notes.timedOut ? { warning: "Web research was cut short to save time, so some details may be missing." } : {}),
+      ...(!notes.searched ? { warning: "Web search isn't enabled on the Anthropic account, so research used your website only." } : {}),
+    };
+  } catch (err) {
+    console.warn(`[brand research] ${workspaceId}: ${(err as Error).message}`);
+    await saveResearch(db, workspaceId, input, { notes: "", error: (err as Error).message });
+    return { ok: false, searched: false, warning: `Web research didn't work this time (${researchErrorText(err)}), so your draft is based on your website.` };
+  }
+}
+
+/** Stage 3: turn everything into the draft. Always returns a draft, even without AI. */
+export async function analyseFinish(db: Db, workspaceId: string, input: AnalyseInput): Promise<BrandDraft & { warnings: string[] }> {
+  const stored = await loadResearch(db, workspaceId);
+  const site = stored.site ?? emptySite(input.website_url);
+  const notes = stored.notes ?? "";
+  const warnings: string[] = [];
+  let profile: Profile | null = null;
+  const attempts: [tier: "strategy" | "fast", withLogo: boolean, ms: number][] = [["strategy", true, BUDGET.structure], ["fast", false, BUDGET.structureFallback]];
+  for (const [tier, withLogo, ms] of attempts) {
+    try {
+      profile = await structure(db, workspaceId, notes, site, { tier, withLogo, timeoutMs: ms });
+      break;
+    } catch (err) {
+      console.warn(`[brand structure] ${workspaceId} (${tier}): ${(err as Error).message}`);
+    }
+  }
+  if (!profile) {
+    profile = siteOnlyProfile(site);
+    warnings.push("The AI couldn't build your profile this time, so we filled in what your website says. Please complete the empty fields.");
   }
   const merged = mergeProfile(site, profile, input);
   await db.query(
-    `insert into brand_brains (workspace_id, website_url, goal, language, draft, competitor_suggestions, research)
-     values ($1,$2,$3,$4,$5,$6,$7)
-     on conflict (workspace_id) do update set draft = excluded.draft, competitor_suggestions = excluded.competitor_suggestions,
-       research = excluded.research, updated_at = now()`,
+    `insert into brand_brains (workspace_id, website_url, goal, language, draft, competitor_suggestions) values ($1,$2,$3,$4,$5,$6)
+     on conflict (workspace_id) do update set draft = excluded.draft, competitor_suggestions = excluded.competitor_suggestions, updated_at = now()`,
     [workspaceId, input.website_url, input.goal, merged.brain.language, JSON.stringify({ ...merged.brain, name: merged.name, logos: merged.logos }),
-      JSON.stringify(merged.competitor_suggestions), JSON.stringify({ notes: notes.text, searched: notes.searched, site_reachable: site.reachable, at: new Date().toISOString() })],
+      JSON.stringify(merged.competitor_suggestions)],
   );
-  return { ...merged, researched_with_web: notes.searched, site_reachable: site.reachable };
+  return { ...merged, researched_with_web: !!stored.searched && !!notes, site_reachable: site.reachable, warnings };
+}
+
+/** All three stages in one call (tests and scripts; the web app calls them one by one). */
+export async function researchBrand(db: Db, workspaceId: string, input: AnalyseInput): Promise<BrandDraft & { warnings: string[] }> {
+  const a = await analyseSite(db, workspaceId, input);
+  const b = await analyseResearch(db, workspaceId, input);
+  const c = await analyseFinish(db, workspaceId, input);
+  return { ...c, warnings: [a.warning, b.warning, ...c.warnings].filter((w): w is string => !!w) };
+}
+
+async function structure(db: Db, workspaceId: string, notes: string, site: SiteProfile, o: { tier: "strategy" | "fast"; withLogo: boolean; timeoutMs: number }): Promise<Profile> {
+  // Without research notes, the page text is the only source for products and audience.
+  const pages = notes ? [] : site.pages.map((p) => ({ ...p, text: p.text.slice(0, 3000) }));
+  return structured({
+    db, task: "brand_brain:structure", workspaceId, tier: o.tier,
+    system: [STRUCTURE_ROLE],
+    content: [
+      ...(o.withLogo ? logoBlock(site) : []),
+      { type: "text", text: `Research notes:\n${notes || "(none; use the website text)"}\n\nWebsite:\n${siteBlock({ ...site, pages })}` },
+    ],
+    schema: Profile,
+    timeoutMs: o.timeoutMs,
+    maxTokens: 6000,
+  });
+}
+
+/** A profile from the website's own metadata, for when the AI can't answer. */
+export function siteOnlyProfile(site: SiteProfile): Profile {
+  return {
+    name: site.name ?? "", description: site.description ?? "", industry: "", country: site.country ?? "", language: site.language ?? "",
+    audience: "", pillars: [], tone_words: [], products: [], social_links: [], brand_colors: [], banned_topics: [], competitors: [],
+  };
+}
+
+function researchErrorText(err: unknown): string {
+  const status = (err as { status?: number }).status;
+  if (status === 429) return "the AI service is busy";
+  if (status === 401) return "the Anthropic API key was rejected";
+  if (err instanceof Error && /budget/i.test(err.message)) return "today's AI budget is used up";
+  return "the AI service didn't respond";
+}
+
+/** Reject if `p` takes longer than `ms`. */
+export function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout;
+  return Promise.race([
+    p.finally(() => clearTimeout(timer)),
+    new Promise<T>((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error("timed out"), { name: "TimeoutError" })), ms); }),
+  ]);
 }
 
 const COMPETITOR_ROLE = `You research competitors for a company's social content strategy. Find 6-10 companies that sell the SAME core products to the SAME kind of customer in the SAME markets. Prefer direct, similar-sized competitors over global giants from other markets, and skip the company itself. For each: name, website, one sentence on why they compete, which of the company's products they overlap with, the market, your confidence, and their public social handles if you can find them. Use web search to check.`;
 
 const CompetitorList = z.object({ competitors: Profile.shape.competitors });
+
+export class CompetitorResearchError extends Error {}
 
 /** Re-run competitor research from an existing Brand Brain (Settings → Competitors). */
 export async function researchCompetitors(db: Db, workspaceId: string): Promise<CompetitorSuggestion[]> {
@@ -229,11 +340,14 @@ export async function researchCompetitors(db: Db, workspaceId: string): Promise<
     `Customers: ${b.audience}`,
     `Products and services:\n${(b.offers ?? []).map((o) => `- ${o.name}${o.revenue_role ? ` [${o.revenue_role}]` : ""}${o.description ? `: ${o.description}` : ""}`).join("\n")}`,
   ].filter(Boolean).join("\n");
-  const notes = await research({ db, task: "competitors:research", workspaceId, system: [COMPETITOR_ROLE], content: brief, maxFetches: 2 });
+  const notes = await research({ db, task: "competitors:research", workspaceId, system: [COMPETITOR_ROLE], content: brief, maxFetches: 2, timeoutMs: BUDGET.competitors });
+  // Keep the previous list rather than replace it with nothing.
+  if (!notes.text) throw new CompetitorResearchError("Competitor research took too long this time. Try again in a minute, or add competitors yourself below.");
   const out = await structured({
     db, task: "competitors:structure", workspaceId, tier: "fast", system: [STRUCTURE_ROLE],
     content: `Company:\n${brief}\n\nCompetitor research notes:\n${notes.text}`,
     schema: CompetitorList,
+    timeoutMs: BUDGET.competitorsStructure,
   });
   const own = (b.website_url ?? "").replace(/^https?:\/\/(www\.)?/, "").split("/")[0] ?? "";
   const list = out.competitors.map(toSuggestion).filter((c) => c.name && !(own && c.website?.includes(own)))
